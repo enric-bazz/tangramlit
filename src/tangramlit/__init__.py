@@ -46,8 +46,6 @@ _lazy_modules = {
     "plot_score_histograms": ".analysis",
     # Training genes
     "traffic_light_plot": ".analysis",
-    "analyze_spatial_patterns": ".analysis",
-    "compute_spatial_correlations": ".analysis",
 }
 
 def __getattr__(name):
