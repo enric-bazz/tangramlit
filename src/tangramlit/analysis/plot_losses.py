@@ -3,6 +3,16 @@ import numpy as np
 import torch
 import math
 
+# NOTE: plotting functions return their figure(s) and never call plt.show(), so that they
+# work unchanged in notebooks, in scripts and on headless machines.
+
+
+def _history_to_array(values):
+    """Turn a history entry (list of floats or scalar tensors, or an array after an h5ad round trip) into a float array."""
+    return np.asarray(
+        [v.detach().cpu().item() if torch.is_tensor(v) else v for v in values],
+        dtype=float,
+    )
 
 
 def plot_training_history(adata_map, hyperpams=None, lambda_scale=True, log_scale=False, show_total_loss=False):
@@ -17,6 +27,7 @@ def plot_training_history(adata_map, hyperpams=None, lambda_scale=True, log_scal
             show_total_loss (bool): Whether to show the total loss term named 'loss' (default: False)
 
         Returns:
+            matplotlib Figure.
             Note that the trainig step stores in adata_map.uns["training_history"] the loss terms for each epoch already scaled
             by their respective hyperparameters, thus to get non scaled values we divide by the respective lambda.
     """
@@ -28,23 +39,12 @@ def plot_training_history(adata_map, hyperpams=None, lambda_scale=True, log_scal
     if not lambda_scale and hyperpams is None:
         raise ValueError("Missing hyperparamters for re-scaling.")
 
-    # Retrieve loss terms labels that are not empty
-    loss_terms_labels = [k for k, v in adata_map.uns['training_history'].items() if v]
-
-    # Initiate empty dict containing numpy arrays
-    loss_dict = {key: None for key in loss_terms_labels}
-
-    # Some terms are returned as a list of torch tensors (scalars) others as lists of float: turn all into ndarray
-    for k in loss_terms_labels:
-        if type(adata_map.uns["training_history"][k][0]) == torch.Tensor and not torch.isnan(adata_map.uns["training_history"][k][0]):
-            loss_term_values = []
-            for entry in adata_map.uns["training_history"][k]:
-                loss_term_values.append(entry.detach())
-            loss_term_values = np.asarray(loss_term_values)
-        elif type(adata_map.uns["training_history"][k][0]) == float and not np.isnan(adata_map.uns["training_history"][k][0]):
-            loss_term_values = np.asarray(adata_map.uns["training_history"][k])
-            # does not implement .copy()
-        loss_dict[k] = loss_term_values
+    # Keep the loss terms that were recorded (terms with lambda = 0 have an empty history)
+    loss_dict = {
+        k: _history_to_array(v)
+        for k, v in adata_map.uns["training_history"].items()
+        if len(v) > 0
+    }
 
     # Scale by lambda (bool)
     loss_lambda_map = {
@@ -65,7 +65,6 @@ def plot_training_history(adata_map, hyperpams=None, lambda_scale=True, log_scal
     }
     if not lambda_scale:
         for loss_key in (loss_dict.keys() & loss_lambda_map.keys()):
-            #if loss_dict[loss_key].any():  # truthy keys only
             loss_dict[loss_key] = loss_dict[loss_key] / hyperpams[loss_lambda_map[loss_key]]
 
     # Optionally hide the total loss term named 'total_loss'
@@ -74,7 +73,7 @@ def plot_training_history(adata_map, hyperpams=None, lambda_scale=True, log_scal
         loss_dict.pop('total_loss', None)
 
     # Create plot
-    plt.figure(figsize=(10,20))
+    fig = plt.figure(figsize=(10,20))
 
     title = 'Loss terms over epochs'
     if lambda_scale:
@@ -91,7 +90,8 @@ def plot_training_history(adata_map, hyperpams=None, lambda_scale=True, log_scal
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title(title)
-    plt.show()
+
+    return fig
 
 
 def plot_loss_terms(
@@ -102,7 +102,7 @@ def plot_loss_terms(
     log_scale=False,
     make_subplot=False,
     subplot_shape=None,
-):   
+):
     """
     Plot one or more loss terms from adata_map.uns['training_history'].
 
@@ -115,6 +115,9 @@ def plot_loss_terms(
         log_scale (bool): if True, use semilog-y
         make_subplot (bool): if True, draw all curves in subplots
         subplot_shape (tuple[int, int] | None): (nrows, ncols) for subplots
+
+    Returns:
+        A single matplotlib Figure if make_subplot is True, otherwise a list with one Figure per loss term.
     """
     history = adata_map.uns.get("training_history")
     if history is None:
@@ -131,6 +134,7 @@ def plot_loss_terms(
         raise ValueError("loss_key and lambda_coeff must have equal length.")
 
     n_terms = len(loss_key)
+    figures = []
 
     if make_subplot:
         if subplot_shape is None:  # square subplot shape
@@ -140,20 +144,14 @@ def plot_loss_terms(
             nrows, ncols = subplot_shape
         fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
         axes = np.array(axes).reshape(-1)
-    else:
-        fig, axes = None, None
+        figures.append(fig)
 
     for i, (key, coeff) in enumerate(zip(loss_key, lambda_coeff)):
         if key not in history:
             raise ValueError(f"Loss term '{key}' not found in training_history.")
-        values = history[key]
-        if not values:
+        if len(history[key]) == 0:
             raise ValueError(f"Loss term '{key}' has empty history.")
-
-        # to numpy
-        if isinstance(values[0], torch.Tensor):
-            values = [v.item() if v.numel() == 1 else v.detach().cpu().numpy() for v in values]
-        values = np.asarray(values, dtype=float)
+        values = _history_to_array(history[key])
 
         # Unscale if required
         if not lambda_scale and coeff != 0:
@@ -163,8 +161,9 @@ def plot_loss_terms(
         if make_subplot:
             ax = axes[i]
         else:
-            plt.figure(figsize=(7, 4))
+            fig = plt.figure(figsize=(7, 4))
             ax = plt.gca()
+            figures.append(fig)
 
         if log_scale:
             ax.semilogy(np.abs(values))
@@ -175,12 +174,13 @@ def plot_loss_terms(
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Loss")
 
-    plt.tight_layout()
-    plt.show()
-        
+    for fig in figures:
+        fig.tight_layout()
+
+    return figures[0] if make_subplot else figures
 
 
-def plot_validation_metrics_history(adata_map, figsize=(10, 5), add_training_scores=False):
+def plot_validation_metrics_history(adata_map, figsize=(10, 5), add_training_scores=False, hyperpams=None):
     """
     Plots the history of validation metrics stored in adata_map.uns['validation_history'] in separated plots.
     Optionally compare training score and sparsity-weighted score with the validation ones if add_training_scores is True.
@@ -188,37 +188,61 @@ def plot_validation_metrics_history(adata_map, figsize=(10, 5), add_training_sco
     Args:
         adata_map: anndata object returned by the mapping containing the validation history
         figsize: tuple specifying the figure size
+        add_training_scores (bool): overlay the training score on 'val_score' and the training sparsity-weighted
+            score on 'val_sparsity-weighted_score'. A training curve is skipped when its loss term was not active.
+        hyperpams (dict): Optional. Hyperparameters used for the mapping (e.g. mapper.hparams). The training history
+            stores lambda-weighted terms while validation scores are unweighted: when given, training curves are
+            divided by their lambda to make the two comparable; otherwise they are plotted as stored and labelled so.
+
+    Returns:
+        dict mapping each validation metric name to its matplotlib Figure.
     """
     if 'validation_history' not in adata_map.uns:
         raise ValueError("Missing 'validation_history' in adata_map.uns.")
 
     val_history = adata_map.uns['validation_history']
-    metrics = val_history.keys()
-    epochs = range(0, len(next(iter(val_history.values()))))
+    training_history = adata_map.uns.get('training_history', {})
 
-    for metric in metrics:
-        plt.figure(figsize=figsize)
-        if add_training_scores and metric == 'val_score':
-            # Plot both training and validation scores
-            plt.plot(epochs, adata_map.uns['training_history']['main_loss'], '-o', label='Training Score')
-            plt.plot(epochs, val_history[metric], '-o', label='Validation Score')
-            plt.ylabel('Score')
-            plt.title('Training vs Validation Score over epochs')
-        elif add_training_scores and metric == 'val_sparsity-weighted_score':
-            # Plot both training and validation sparsity-weighted scores
-            plt.plot(epochs, adata_map.uns['training_history']['sparsity_term'], '-o', label='Training Sparsity-Weighted Score')
-            plt.plot(epochs, val_history[metric], '-o', label='Validation Sparsity-Weighted Score')
-            plt.ylabel('Sparsity-Weighted Score')
-            plt.title('Training vs Validation Sparsity-Weighted Score over epochs')
+    # Validation metric -> (training loss term, its lambda, label)
+    training_counterpart = {
+        'val_score': ('main_loss', 'lambda_g1', 'Score'),
+        'val_sparsity-weighted_score': ('sparsity_term', 'lambda_sparsity_g1', 'Sparsity-Weighted Score'),
+    }
+
+    figures = {}
+    for metric in val_history.keys():
+        val_values = _history_to_array(val_history[metric])
+        val_epochs = np.arange(len(val_values))
+
+        train_values = None
+        if add_training_scores and metric in training_counterpart:
+            term, lambda_name, label = training_counterpart[metric]
+            if len(training_history.get(term, [])) > 0:
+                train_values = _history_to_array(training_history[term])
+                train_label = f'Training {label}'
+                if hyperpams is not None:
+                    train_values = train_values / hyperpams[lambda_name]
+                else:
+                    train_label += f' (x {lambda_name})'
+                # Place validation points on the epochs they were computed at (validation every N epochs)
+                if len(val_values) > 0:
+                    every = max(1, round(len(train_values) / len(val_values)))
+                    val_epochs = (val_epochs + 1) * every - 1
+
+        fig = plt.figure(figsize=figsize)
+        if train_values is not None:
+            plt.plot(np.arange(len(train_values)), train_values, '-o', label=train_label)
+            plt.plot(val_epochs, val_values, '-o', label=f'Validation {label}')
+            plt.ylabel(label)
+            plt.title(f'Training vs Validation {label} over epochs')
+            plt.legend()
         else:
-            plt.plot(epochs, val_history[metric], '-o')
+            plt.plot(val_epochs, val_values, '-o')
             plt.ylabel(metric)
             plt.title(f'Validation {metric} over epochs')
 
         plt.xlabel('Epoch')
         plt.grid(True)
-        plt.legend()
-        plt.show()
+        figures[metric] = fig
 
-
-
+    return figures
