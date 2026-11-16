@@ -73,11 +73,13 @@ def benchmark_mapping(adata_ge, datamodule, df_g):
         js_vals = np.full(n_sel, np.nan)
         ssim_vals = np.full(n_sel, np.nan)
 
-    # Add metric columns to dataframe (align by selected_genes order)
-    df_g["PCC"] = pcc_vals
-    df_g["RMSE"] = rmse_vals
-    df_g["JS"] = js_vals
-    df_g["SSIM"] = ssim_vals
+    # Add metric columns to dataframe, aligned on gene names: df_g comes sorted by score,
+    # while the metric arrays follow the order of selected_genes
+    metrics = pd.DataFrame(
+        {"PCC": pcc_vals, "RMSE": rmse_vals, "JS": js_vals, "SSIM": ssim_vals},
+        index=selected_genes,
+    )
+    df_g = df_g.drop(columns=metrics.columns, errors="ignore").join(metrics)
 
 
     # Sort scores
