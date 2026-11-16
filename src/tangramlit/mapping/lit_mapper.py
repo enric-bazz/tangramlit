@@ -81,9 +81,10 @@ class MapperLightning(LightningModule):
             self.F = None
             # self.F = nn.Parameter(torch.empty(0), requires_grad=True)  # to pre-allocate parameter
         # self.d_prior = None  # density prior
-        self.getis_ord_G_star_ref = None  # LISA
-        self.moran_I_ref = None
-        self.gearys_C_ref = None
+        # LISA reference values: buffers, so that they follow the module to its device
+        self.register_buffer("getis_ord_G_star_ref", None, persistent=False)
+        self.register_buffer("moran_I_ref", None, persistent=False)
+        self.register_buffer("gearys_C_ref", None, persistent=False)
         self.epoch_values = None  # epoch loss terms
 
         # Instantiate the loss class
@@ -189,7 +190,7 @@ class MapperLightning(LightningModule):
                 else:
                     self.register_buffer(name, None)
 
-            # LISA on ground truth (reference values)
+            # LISA on ground truth (reference values, assigned to the buffers registered in __init__)
             self.getis_ord_G_star_ref, self.moran_I_ref, self.gearys_C_ref = self._spatial_local_indicators(G)
    
 
