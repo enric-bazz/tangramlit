@@ -150,7 +150,8 @@ def  run(args):
         adata_ge = project_sc_genes_onto_space(adata_map, datamodule)
         fold_df_g = compare_spatial_geneexp(adata_ge, datamodule)
         fold_df_g = benchmark_mapping(adata_ge, datamodule, fold_df_g)
-        fold_summary = aggregate_benchmarking_metrics(fold_df_g)
+        # Summarize on the held-out genes only (adata_ge also contains the training genes)
+        fold_summary = aggregate_benchmarking_metrics(fold_df_g[fold_df_g["is_validation"]])
 
         print(f"    Fold {fold_idx} completed.")
         
@@ -164,7 +165,7 @@ def  run(args):
         for ind in fold_summary.index:
             if ind not in cv_metrics:
                 cv_metrics[ind] = []
-            cv_metrics[ind] = fold_summary['mean'].loc[ind]
+            cv_metrics[ind].append(float(fold_summary['mean'].loc[ind]))
 
     # Calculate average metrics
     print("Computing average metrics...")
