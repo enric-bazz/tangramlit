@@ -1,6 +1,3 @@
-from sklearn.metrics import classification_report, accuracy_score
-import logging
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -113,19 +110,16 @@ def count_deterministic_mapping_matches(cells_to_spots_df, spots_to_cells_df):
 
     Returns:
         The fraction of spots that match the reverse mapping.
+        A spot whose cell is missing from cells_to_spots_df (e.g. the two tables were built with different
+        filter settings) counts as not matching.
     """
+    # Spot assigned to each cell from the cells perspective (each cell appears once)
+    cell_to_spot = cells_to_spots_df.set_index('cell index')['spot index']
+    # Spot that the cell assigned to each spot maps back to (NaN if the cell is missing)
+    spot_idx_matched = spots_to_cells_df['cell index'].map(cell_to_spot)
+
     # Count number of matches
-    n_matches = 0
-    for _, row in spots_to_cells_df.iterrows():
-        spot_idx = row['spot index']  # current spot index
-        cell_idx = row['cell index']  # matched cell index
-
-        # Get spot matched spot index from cells_to_spots_df
-        spot_idx_matched = cells_to_spots_df.loc[cells_to_spots_df['cell index'] == cell_idx, 'spot index'].values[0]
-
-        # Check if they match
-        if spot_idx == spot_idx_matched:
-            n_matches += 1
+    n_matches = int((spot_idx_matched == spots_to_cells_df['spot index']).sum())
 
     # Compute fraction of spots that match the reverse mapping
     matches_fraction = n_matches / len(spots_to_cells_df)
@@ -156,11 +150,8 @@ def deterministic_mapping_similarity(adata_map, adata_sc, adata_st, flavour: str
     Returns:
         mapped_similarity (array): shape = (n_spots/n_cells, ) depending on the mapping perspective. Cosine similarity of the shared
         genes expression profile between the deterministic cell-spot pair.
+        If plot is True the histogram is drawn in a new figure (retrieve it with plt.gcf()).
     """
-
-    # Make all gene names to lower case
-    adata_sc.var_names = adata_sc.var_names.str.lower()
-    adata_st.var_names = adata_st.var_names.str.lower()
 
     # Get deterministic cell-spot pair, always (spot_idx, cell_idx)
     if flavour == "spot_to_cell":
@@ -186,8 +177,9 @@ def deterministic_mapping_similarity(adata_map, adata_sc, adata_st, flavour: str
         spot_idx = spot_idx.tolist()
 
     # Extract expression profiles using AnnData indexing (safe with names or integers)
-    sc_profile = adata_sc[cell_idx, shared_genes].X
-    st_profile = adata_st[spot_idx, shared_genes].X
+    # Genes are matched case-insensitively by position, without renaming the input data
+    sc_profile = adata_sc[cell_idx, _gene_positions(adata_sc, shared_genes)].X
+    st_profile = adata_st[spot_idx, _gene_positions(adata_st, shared_genes)].X
 
     # Turn to array if sparse
     if hasattr(sc_profile, "toarray"):
@@ -209,10 +201,22 @@ def deterministic_mapping_similarity(adata_map, adata_sc, adata_st, flavour: str
 
     if plot:
         # Histogram of cosine similarities
+        plt.figure()
         plt.hist(mapped_similarity, bins=np.linspace(-1, 1, 50), edgecolor="black")
         plt.title("Histogram of pair similarities")
         plt.xlabel("Cosine similarity")
         plt.ylabel("Number of pairs")
-        plt.show()
 
     return mapped_similarity
+
+
+def _gene_positions(adata, genes):
+    """
+    Column positions of `genes` (lower case names) in adata, matching var names case-insensitively.
+    Leaves adata untouched; if several var names differ only by case the first one is used.
+    """
+    positions = pd.Series(np.arange(adata.n_vars), index=adata.var_names.str.lower())
+    positions = positions[~positions.index.duplicated()].reindex(genes)
+    if positions.isna().any():
+        raise KeyError(f"Genes not found in data: {list(positions.index[positions.isna()])}")
+    return positions.to_numpy(dtype=int)

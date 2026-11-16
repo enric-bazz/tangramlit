@@ -52,10 +52,6 @@ def deterministic_annotation(
     if not set(adata_st.obs[st_cluster_label].unique()).issubset(set(adata_sc.obs[sc_cluster_label].unique())):
         logging.warning('Annotation labels are not harmonized')
 
-    # Make all gene names to lower case
-    adata_sc.var_names = adata_sc.var_names.str.lower()
-    adata_st.var_names = adata_st.var_names.str.lower()
-
     # Get deterministic spot-cell pair, always (spot_idx, cell_idx)
     if flavour == "spot_to_cell":
         # Each spot assigned to a cell
