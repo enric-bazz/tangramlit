@@ -218,7 +218,7 @@ class MapperLightning(LightningModule):
             # Mask normalized distances with connectivity (keep only neighbor links)
             spatial_weights = connectivities.multiply(distances_norm)
         else:
-            spatial_weights = connectivities
+            spatial_weights = connectivities.clone()  # own copy: the input graph is shared by all weight matrices
         if self_inclusion:  
             spatial_weights += torch.eye(spatial_weights.shape[0], dtype=torch.float32, device=device)
         return spatial_weights
