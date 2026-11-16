@@ -2,6 +2,9 @@ from matplotlib import pyplot as plt
 import numpy as np
 from scipy.stats import linregress
 
+# NOTE: plotting functions return their figure(s) and never call plt.show(), so that they
+# work unchanged in notebooks, in scripts and on headless machines.
+
 def compute_filter_corr(adata_map, plot=True, plot_regression=False):
     """
     Compute correlation of initial and final filter values
@@ -9,7 +12,11 @@ def compute_filter_corr(adata_map, plot=True, plot_regression=False):
 
     Args:
         adata_map: adata object output of map_cells_to_space(). Must contain adata_map.uns['filter_history']
-        plot (bool): If True, show scatterplot with regression line.
+        plot (bool): If True, draw the scatterplot in a new figure (retrieve it with plt.gcf()).
+        plot_regression (bool): If True, add the regression line to the scatterplot.
+
+    Returns:
+        Pearson correlation coefficient between initial and final filter values.
     """
 
     if "filter_history" not in adata_map.uns.keys():
@@ -41,7 +48,6 @@ def compute_filter_corr(adata_map, plot=True, plot_regression=False):
         plt.title(f"Correlation = {filter_corr:.3f}")
         plt.legend()
         plt.tight_layout()
-        plt.show()
 
     return filter_corr
 
@@ -53,8 +59,8 @@ def filter_cell_choice_consistency(filter_square, threshold=0.5):
         filter_square (array shape = (n_cells, n_runs)): Square containing in each column the final filter values of each run.
         threshold (float): Threshold value for cell filtering.
     Returns:
-        Prints a histogram of the number of runs each cell is selected in (is above threshold).
-        Reports the filter consistency as the percentage, over all cells, of cells that are selected in all runs.
+        Draws, in a new figure, a histogram of the number of runs each cell is selected in (is above threshold).
+        Returns the filter consistency: the fraction of cells that are selected in all runs.
     """
 
     # Get number of runs
@@ -64,10 +70,10 @@ def filter_cell_choice_consistency(filter_square, threshold=0.5):
     selected_cells = np.sum(filter_square > threshold, axis=1)
 
     # Plot histogram of selected cells
+    plt.figure()
     plt.hist(selected_cells, bins=np.arange(0, n_runs+1), edgecolor="black")
     plt.title("Histogram of selected cells")
     plt.xlabel("Number of selected runs")
-    plt.show()
 
     # Compute consistency
     consistency = np.sum(selected_cells == n_runs) / len(selected_cells)
@@ -94,26 +100,29 @@ def plot_filter_weights(
         plot_spaghetti (bool): plot individual cell trajectories
         plot_envelope (bool): plot mean ± std envelopes for two trajectory groups
         threshold (float): threshold to split cells for envelope plot
+
+    Returns:
+        dict with one matplotlib Figure per requested plot, keyed 'heatmap', 'spaghetti', 'envelope'.
     """
     matrix = np.column_stack(adata_map.uns["filter_history"]["filter_values"])
     n_cells, n_epochs = matrix.shape
     epochs = np.arange(n_epochs)
     base_width = 12
+    figures = {}
 
     if plot_heatmap:
         aspect_ratio = n_epochs / n_cells
         fig_height = min(base_width / aspect_ratio, 16)
-        plt.figure(figsize=(base_width, fig_height))
+        figures["heatmap"] = plt.figure(figsize=(base_width, fig_height))
         im = plt.imshow(matrix, aspect="auto")
         plt.colorbar(im, fraction=0.03, pad=0.05)
         plt.xlabel("Epoch")
         plt.ylabel("Cell")
         plt.title("Sigmoid filter weights over epochs")
         plt.tight_layout()
-        plt.show()
 
     if plot_spaghetti:
-        plt.figure(figsize=(base_width, 5))
+        figures["spaghetti"] = plt.figure(figsize=(base_width, 5))
         for cell_idx in range(n_cells):
             plt.plot(epochs, matrix[cell_idx, :], alpha=0.1, color="blue")
         plt.xlabel("Epoch")
@@ -121,7 +130,6 @@ def plot_filter_weights(
         plt.title("Individual cell filter weight trajectories")
         plt.ylim(0, 1)
         plt.tight_layout()
-        plt.show()
 
     if plot_envelope:
         # Split cells based on final epoch mean threshold
@@ -129,7 +137,7 @@ def plot_filter_weights(
         high_group = matrix[final_vals >= threshold, :]
         low_group = matrix[final_vals < threshold, :]
 
-        plt.figure(figsize=(base_width, 5))
+        figures["envelope"] = plt.figure(figsize=(base_width, 5))
         for group, color, label in [
             (low_group, "orange", "Low group"),
             (high_group, "blue", "High group"),
@@ -154,7 +162,8 @@ def plot_filter_weights(
         plt.ylim(0, 1)
         plt.legend()
         plt.tight_layout()
-        plt.show()
+
+    return figures
 
 
 
@@ -169,6 +178,9 @@ def plot_filter_count(adata_map, target_count=None, threshold=0.5, figsize=(10, 
 
         This is a useful diagnostic plot as it shows how far the final number of cells is from the target.
         It should be related to the corresponding term in the loss function.
+
+    Returns:
+        matplotlib Figure.
     """
     n_spots = adata_map.X.shape[1]
 
@@ -192,4 +204,5 @@ def plot_filter_count(adata_map, target_count=None, threshold=0.5, figsize=(10, 
     ax.set_title('Number of cells passing filter threshold per epoch')
     ax.grid(True)
     ax.legend()
-    plt.show()
+
+    return fig

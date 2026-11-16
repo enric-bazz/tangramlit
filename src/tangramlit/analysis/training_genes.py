@@ -18,7 +18,7 @@ def traffic_light_plot(genes_list, values_sc=None, values_sp=None, figsize=(10, 
         figsize (tuple): Figure size in inches (width, height)
     
     Returns:
-        None (displays the plot)
+        matplotlib Figure.
     """
     n_genes = len(genes_list)
     
@@ -69,7 +69,7 @@ def traffic_light_plot(genes_list, values_sc=None, values_sp=None, figsize=(10, 
     matrix = rgb_array.reshape(height, width, 3)
     
     # Create the plot
-    plt.figure(figsize=figsize)
+    fig = plt.figure(figsize=figsize)
     plt.imshow(matrix)
     
     # Remove all axes, labels, and ticks
@@ -80,13 +80,15 @@ def traffic_light_plot(genes_list, values_sc=None, values_sp=None, figsize=(10, 
         Patch(facecolor='red', label='Single cell signal (Red)'),
         Patch(facecolor='green', label='Spatial signal (Green)'),
         Patch(facecolor='yellow', label='High in both (Red + Green)'),
-        Patch(facecolor='black', label='Padding')
+        Patch(facecolor='black', label='Low in both'),
+        Patch(facecolor='white', edgecolor='black', label='Padding')
     ]
     plt.legend(handles=legend_elements, bbox_to_anchor=(1.05, 0.5), loc='center left')
 
     plt.title(f'Gene Traffic Light Matrix ({height}×{width})')
     
     plt.tight_layout()
-    plt.show()
+
+    return fig
 
     # TODO: pass masks as pandas Series and use indexing for intersection --> use utils.get_matched_genes()
