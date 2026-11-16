@@ -4,6 +4,10 @@ import seaborn as sns
 
 from ..mapping.lit_mapper import poly2_auc
 
+# NOTE: plotting functions return their figure(s) and never call plt.show(), so that they
+# work unchanged in notebooks, in scripts and on headless machines.
+
+
 def plot_training_scores(df_g, bins=10, alpha=0.7):
     """
         Plots the 4-panel training diagnosis plot. Restricted on genes flagged as 'is_training'.
@@ -14,7 +18,7 @@ def plot_training_scores(df_g, bins=10, alpha=0.7):
             alpha (float): Optional. Ranges from 0-1, and controls the opacity. Default is 0.7.
 
         Returns:
-            None
+            matplotlib Figure.
     """
     df_g = df_g.loc[df_g['is_training']]
 
@@ -60,89 +64,124 @@ def plot_training_scores(df_g, bins=10, alpha=0.7):
         color="coral",
     )
 
-    plt.tight_layout()
-    plt.show()
+    fig.tight_layout()
+
+    return fig
+
+
+def _select_genes(df, mask_col, stat_col=None):
+    """Genes flagged in `mask_col` with a non-zero score and, if given, a non-null value in `stat_col`."""
+    grp = df.loc[df[mask_col] == True].copy()
+    # remove zero-score entries (poly fit / auc routine requires non-zero scores)
+    grp = grp.loc[grp['score'] != 0]
+    if stat_col is not None:
+        grp = grp.loc[~grp[stat_col].isnull()]
+    return grp
+
+
+def _auc_figure(df, mask_col, title):
+    """Quadratic fit of spatial sparsity vs score for one gene group. Returns (figure, auc), or (None, nan) if the group is empty."""
+    grp = _select_genes(df, mask_col)
+    if grp.empty:
+        return None, np.nan
+
+    auc_score, ((pol_xs, pol_ys), (xs, ys)) = poly2_auc(grp['score'], grp['sparsity_st'], plot_auc=False)
+    fig = plt.figure(figsize=(6, 5))
+    plt.plot(pol_xs, pol_ys, c='r', label=f'poly fit')
+    sns.scatterplot(x=xs, y=ys, alpha=0.6, edgecolors='face', color='blue', label='genes')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.0])
+    plt.gca().set_aspect(.5)
+    plt.xlabel('score')
+    plt.ylabel('spatial sparsity')
+    plt.tick_params(axis='both', labelsize=8)
+    plt.legend()
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
+    plt.text(0.03, 0.1, f'AUC={np.round(auc_score,3)}', fontsize=11, verticalalignment='top', bbox=props)
+    plt.title(title)
+
+    return fig, auc_score
 
 
 def plot_auc_curve(df_g, plot_train=True, plot_validation=True):
     """
-        Plots auc curve of non-training genes score. Test genes are either input or deduced from df_g['is_training'].
+        Plots the quadratic polynomial fit of spatial sparsity vs score and its AUC, separately for
+        training and validation genes.
 
         Args:
             df_g (pandas.DataFrame): returned by compare_spatial_gene_expr(adata_ge, adata_sp).
-            plot_train (bool): if True, include genes flagged as training (df_g['is_training'] == True).
-            plot_test (bool): if True, include genes flagged as NOT training (df_g['is_training'] == False). Default True.
+            plot_train (bool): if True, plot genes flagged as training (df_g['is_training'] == True).
+            plot_validation (bool): if True, plot genes flagged as validation (df_g['is_validation'] == True).
 
         Returns:
-            None
+            tuple: ((fig_train, fig_val), (auc_train, auc_val)). A figure is None and its AUC is NaN
+            when the group was not requested or has no genes.
         """
-    # Use all rows in df_g and split by the boolean flags
-    df_sel = df_g.copy()
-
     # At least one of the plotting flags must be True
     if not plot_train and not plot_validation:
         raise ValueError('At least one of plot_train or plot_validation must be True.')
 
-    def prepare_group(df, mask_col):
-        grp = df.loc[df[mask_col] == True].copy()
-        # remove zero-score entries (poly fit / auc routine requires non-zero scores)
-        grp = grp.loc[grp['score'] != 0]
-        return grp
+    fig_train, auc_train = None, np.nan
+    fig_val, auc_val = None, np.nan
 
-    # Create separate figures for train and validation groups.
-    auc_train = np.nan
-    auc_val = np.nan
+    if plot_train and 'is_training' in df_g.columns:
+        fig_train, auc_train = _auc_figure(df_g, 'is_training', 'Training quadratic polynomial fit')
+    if plot_validation and 'is_validation' in df_g.columns:
+        fig_val, auc_val = _auc_figure(df_g, 'is_validation', 'Validation quadratic polynomial fit')
 
-    fig_train = None
-    fig_val = None
-
-    produced_any = False
-
-    # Training group
-    if plot_train and 'is_training' in df_sel.columns:
-        grp_train = prepare_group(df_sel, 'is_training')
-        if not grp_train.empty:
-            auc_train, ((pol_x_tr, pol_y_tr), (xs_tr, ys_tr)) = poly2_auc(grp_train['score'], grp_train['sparsity_st'], plot_auc=False)
-            fig_train = plt.figure(figsize=(6, 5))
-            plt.plot(pol_x_tr, pol_y_tr, c='r', label=f'poly fit')
-            sns.scatterplot(x=xs_tr, y=ys_tr, alpha=0.6, edgecolors='face', color='blue', label='genes')
-            plt.xlim([0.0, 1.0])
-            plt.ylim([0.0, 1.0])
-            plt.gca().set_aspect(.5)
-            plt.xlabel('score')
-            plt.ylabel('spatial sparsity')
-            plt.tick_params(axis='both', labelsize=8)
-            plt.legend()
-            props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
-            plt.text(0.03, 0.1, f'AUC={np.round(auc_train,3)}', fontsize=11, verticalalignment='top', bbox=props)
-            plt.title('Training quadratic polynomial fit')
-            produced_any = True
-
-    # Validation group
-    if plot_validation and 'is_validation' in df_sel.columns:
-        grp_val = prepare_group(df_sel, 'is_validation')
-        if not grp_val.empty:
-            auc_val, ((pol_x_val, pol_y_val), (xs_val, ys_val)) = poly2_auc(grp_val['score'], grp_val['sparsity_st'], plot_auc=False)
-            fig_val = plt.figure(figsize=(6, 5))
-            plt.plot(pol_x_val, pol_y_val, c='r', label=f'poly fit')
-            sns.scatterplot(x=xs_val, y=ys_val, alpha=0.6, edgecolors='face', color='blue', label='genes')
-            plt.xlim([0.0, 1.0])
-            plt.ylim([0.0, 1.0])
-            plt.gca().set_aspect(.5)
-            plt.xlabel('score')
-            plt.ylabel('spatial sparsity')
-            plt.tick_params(axis='both', labelsize=8)
-            plt.legend()
-            props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
-            plt.text(0.03, 0.1, f'AUC={np.round(auc_val,3)}', fontsize=11, verticalalignment='top', bbox=props)
-            plt.title('Validation quadratic polynomial fit')
-            produced_any = True
-
-    if not produced_any:
+    if fig_train is None and fig_val is None:
         raise ValueError('No genes with non-null score in the requested groups, CosSim not computable.')
 
     # Return the two separate figures (either may be None)
     return (fig_train, fig_val), (auc_train, auc_val)
+
+
+def _safe_corr(x, y):
+    """Pearson correlation ignoring NaNs; NaN if fewer than two valid pairs."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    mask = (~np.isnan(x)) & (~np.isnan(y))
+    if mask.sum() < 2:
+        return np.nan
+    try:
+        return float(np.corrcoef(x[mask], y[mask])[0, 1])
+    except Exception:
+        return np.nan
+
+
+def _score_vs_stat_figure(df, mask_col, stat_col, title, plot_fit):
+    """Score vs one spatial-autocorrelation statistic for one gene group. Returns (figure, correlation), or (None, nan) if the group is empty."""
+    grp = _select_genes(df, mask_col, stat_col)
+    if grp.empty:
+        return None, np.nan
+
+    xs = grp['score']
+    ys = grp[stat_col]
+    corr = _safe_corr(xs, ys)
+    fig = plt.figure(figsize=(6, 5))
+    sns.scatterplot(x=ys, y=xs, alpha=0.6, edgecolors='face', color='blue', label='genes')
+    if plot_fit and xs.size > 1:
+        mask = (~np.isnan(xs)) & (~np.isnan(ys))
+        if mask.sum() > 1 and np.unique(ys[mask]).size > 1:
+            coeffs = np.polyfit(ys[mask], xs[mask], 1)
+            xmin = float(np.min(ys[mask]))
+            xmax = float(np.max(ys[mask]))
+            rng = xmax - xmin
+            delta = rng * 0.05 if rng > 0 else max(0.1, abs(xmin) * 0.05)
+            fit_x = np.linspace(xmin - delta, xmax + delta, 200)
+            fit_y = np.polyval(coeffs, fit_x)
+            plt.plot(fit_x, fit_y, c='r', label='linear fit')
+    plt.ylim([0.0, 1.0])
+    plt.gca().set_aspect(.5)
+    plt.xlabel(stat_col)
+    plt.ylabel('score')
+    plt.tick_params(axis='both', labelsize=8)
+    plt.legend()
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
+    plt.text(0.03, 0.1, f'corr={np.round(corr,3)}', fontsize=11, verticalalignment='top', bbox=props)
+    plt.title(title)
+
+    return fig, corr
 
 
 def plot_score_SA_corr(df_g, plot_train=True, plot_validation=True, plot_fit=True):
@@ -162,178 +201,38 @@ def plot_score_SA_corr(df_g, plot_train=True, plot_validation=True, plot_fit=Tru
             figures_tuple = (fig_train_moran, fig_val_moran, fig_train_geary, fig_val_geary)
             correlations_tuple = (corr_train_moran, corr_val_moran, corr_train_geary, corr_val_geary)
     """
-    df_sel = df_g.copy()
-
     if not plot_train and not plot_validation:
         raise ValueError('At least one of plot_train or plot_validation must be True.')
 
     # Determine available spatial-autocorr columns
-    moran_col = 'moranI' if 'moranI' in df_sel.columns else None
-    geary_col = 'gearyC' if 'gearyC' in df_sel.columns else ('geary' if 'geary' in df_sel.columns else None)
+    moran_col = 'moranI' if 'moranI' in df_g.columns else None
+    geary_col = 'gearyC' if 'gearyC' in df_g.columns else ('geary' if 'geary' in df_g.columns else None)
 
     if moran_col is None and geary_col is None:
         raise ValueError("Neither 'moranI' nor 'gearyC'/'geary' found in dataframe.")
 
-    def prepare_group(df, mask_col, stat_col):
-        grp = df.loc[df[mask_col] == True].copy()
-        grp = grp.loc[grp['score'] != 0]
-        if stat_col is not None:
-            grp = grp.loc[~grp[stat_col].isnull()]
-        return grp
+    # One (figure, correlation) pair per gene group and statistic; (None, nan) when not produced
+    results = {(group, stat): (None, np.nan) for group in ('train', 'val') for stat in ('moran', 'geary')}
 
-    def safe_corr(x, y):
-        x = np.asarray(x, dtype=float)
-        y = np.asarray(y, dtype=float)
-        mask = (~np.isnan(x)) & (~np.isnan(y))
-        if mask.sum() < 2:
-            return np.nan
-        try:
-            return float(np.corrcoef(x[mask], y[mask])[0, 1])
-        except Exception:
-            return np.nan
+    groups = []
+    if plot_train and 'is_training' in df_g.columns:
+        groups.append(('train', 'is_training', 'Training'))
+    if plot_validation and 'is_validation' in df_g.columns:
+        groups.append(('val', 'is_validation', 'Validation'))
 
-    # placeholders for figures and correlations
-    fig_train_moran = None
-    fig_val_moran = None
-    fig_train_geary = None
-    fig_val_geary = None
+    for group, mask_col, group_title in groups:
+        for stat, stat_col, stat_title in (('moran', moran_col, 'Moran I'), ('geary', geary_col, 'Geary C')):
+            if stat_col is not None:
+                results[(group, stat)] = _score_vs_stat_figure(
+                    df_g, mask_col, stat_col, f'{group_title} {stat_title} vs score', plot_fit
+                )
 
-    corr_train_moran = np.nan
-    corr_val_moran = np.nan
-    corr_train_geary = np.nan
-    corr_val_geary = np.nan
-
-    produced_any = False
-
-    # Training group
-    if plot_train and 'is_training' in df_sel.columns:
-        if moran_col is not None:
-            grp = prepare_group(df_sel, 'is_training', moran_col)
-            if not grp.empty:
-                xs = grp['score']
-                ys = grp[moran_col]
-                corr_train_moran = safe_corr(xs, ys)
-                fig_train_moran = plt.figure(figsize=(6, 5))
-                sns.scatterplot(x=ys, y=xs, alpha=0.6, edgecolors='face', color='blue', label='genes')
-                if plot_fit and xs.size > 1:
-                    mask = (~np.isnan(xs)) & (~np.isnan(ys))
-                    if mask.sum() > 1 and np.unique(ys[mask]).size > 1:
-                        coeffs = np.polyfit(ys[mask], xs[mask], 1)
-                        xmin = float(np.min(ys[mask]))
-                        xmax = float(np.max(ys[mask]))
-                        rng = xmax - xmin
-                        delta = rng * 0.05 if rng > 0 else max(0.1, abs(xmin) * 0.05)
-                        fit_x = np.linspace(xmin - delta, xmax + delta, 200)
-                        fit_y = np.polyval(coeffs, fit_x)
-                        plt.plot(fit_x, fit_y, c='r', label='linear fit')
-                plt.ylim([0.0, 1.0])
-                plt.gca().set_aspect(.5)
-                plt.xlabel(moran_col)
-                plt.ylabel('score')
-                plt.tick_params(axis='both', labelsize=8)
-                plt.legend()
-                props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
-                plt.text(0.03, 0.1, f'corr={np.round(corr_train_moran,3)}', fontsize=11, verticalalignment='top', bbox=props)
-                plt.title('Training Moran I vs score')
-                produced_any = True
-
-        if geary_col is not None:
-            grp = prepare_group(df_sel, 'is_training', geary_col)
-            if not grp.empty:
-                xs = grp['score']
-                ys = grp[geary_col]
-                corr_train_geary = safe_corr(xs, ys)
-                fig_train_geary = plt.figure(figsize=(6, 5))
-                sns.scatterplot(x=ys, y=xs, alpha=0.6, edgecolors='face', color='blue', label='genes')
-                if plot_fit and xs.size > 1:
-                    mask = (~np.isnan(xs)) & (~np.isnan(ys))
-                    if mask.sum() > 1 and np.unique(ys[mask]).size > 1:
-                        coeffs = np.polyfit(ys[mask], xs[mask], 1)
-                        xmin = float(np.min(ys[mask]))
-                        xmax = float(np.max(ys[mask]))
-                        rng = xmax - xmin
-                        delta = rng * 0.05 if rng > 0 else max(0.1, abs(xmin) * 0.05)
-                        fit_x = np.linspace(xmin - delta, xmax + delta, 200)
-                        fit_y = np.polyval(coeffs, fit_x)
-                        plt.plot(fit_x, fit_y, c='r', label='linear fit')
-                plt.ylim([0.0, 1.0])
-                plt.gca().set_aspect(.5)
-                plt.xlabel(geary_col)
-                plt.ylabel('score')
-                plt.tick_params(axis='both', labelsize=8)
-                plt.legend()
-                props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
-                plt.text(0.03, 0.1, f'corr={np.round(corr_train_geary,3)}', fontsize=11, verticalalignment='top', bbox=props)
-                plt.title('Training Geary C vs score')
-                produced_any = True
-
-    # Validation group
-    if plot_validation and 'is_validation' in df_sel.columns:
-        if moran_col is not None:
-            grp = prepare_group(df_sel, 'is_validation', moran_col)
-            if not grp.empty:
-                xs = grp['score']
-                ys = grp[moran_col]
-                corr_val_moran = safe_corr(xs, ys)
-                fig_val_moran = plt.figure(figsize=(6, 5))
-                sns.scatterplot(x=ys, y=xs, alpha=0.6, edgecolors='face', color='blue', label='genes')
-                if plot_fit and xs.size > 1:
-                    mask = (~np.isnan(xs)) & (~np.isnan(ys))
-                    if mask.sum() > 1 and np.unique(ys[mask]).size > 1:
-                        coeffs = np.polyfit(ys[mask], xs[mask], 1)
-                        xmin = float(np.min(ys[mask]))
-                        xmax = float(np.max(ys[mask]))
-                        rng = xmax - xmin
-                        delta = rng * 0.05 if rng > 0 else max(0.1, abs(xmin) * 0.05)
-                        fit_x = np.linspace(xmin - delta, xmax + delta, 200)
-                        fit_y = np.polyval(coeffs, fit_x)
-                        plt.plot(fit_x, fit_y, c='r', label='linear fit')
-                plt.ylim([0.0, 1.0])
-                plt.gca().set_aspect(.5)
-                plt.xlabel(moran_col)
-                plt.ylabel('score')
-                plt.tick_params(axis='both', labelsize=8)
-                plt.legend()
-                props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
-                plt.text(0.03, 0.1, f'corr={np.round(corr_val_moran,3)}', fontsize=11, verticalalignment='top', bbox=props)
-                plt.title('Validation Moran I vs score')
-                produced_any = True
-
-        if geary_col is not None:
-            grp = prepare_group(df_sel, 'is_validation', geary_col)
-            if not grp.empty:
-                xs = grp['score']
-                ys = grp[geary_col]
-                corr_val_geary = safe_corr(xs, ys)
-                fig_val_geary = plt.figure(figsize=(6, 5))
-                sns.scatterplot(x=ys, y=xs, alpha=0.6, edgecolors='face', color='blue', label='genes')
-                if plot_fit and xs.size > 1:
-                    mask = (~np.isnan(xs)) & (~np.isnan(ys))
-                    if mask.sum() > 1 and np.unique(ys[mask]).size > 1:
-                        coeffs = np.polyfit(ys[mask], xs[mask], 1)
-                        xmin = float(np.min(ys[mask]))
-                        xmax = float(np.max(ys[mask]))
-                        rng = xmax - xmin
-                        delta = rng * 0.05 if rng > 0 else max(0.1, abs(xmin) * 0.05)
-                        fit_x = np.linspace(xmin - delta, xmax + delta, 200)
-                        fit_y = np.polyval(coeffs, fit_x)
-                        plt.plot(fit_x, fit_y, c='r', label='linear fit')
-                plt.ylim([0.0, 1.0])
-                plt.gca().set_aspect(.5)
-                plt.xlabel(geary_col)
-                plt.ylabel('score')
-                plt.tick_params(axis='both', labelsize=8)
-                plt.legend()
-                props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
-                plt.text(0.03, 0.1, f'corr={np.round(corr_val_geary,3)}', fontsize=11, verticalalignment='top', bbox=props)
-                plt.title('Validation Geary C vs score')
-                produced_any = True
-
-    if not produced_any:
+    if all(fig is None for fig, _ in results.values()):
         raise ValueError('No genes with non-null score/statistic in the requested groups, cannot compute correlations.')
 
-    figures = (fig_train_moran, fig_val_moran, fig_train_geary, fig_val_geary)
-    corrs = (corr_train_moran, corr_val_moran, corr_train_geary, corr_val_geary)
+    order = [('train', 'moran'), ('val', 'moran'), ('train', 'geary'), ('val', 'geary')]
+    figures = tuple(results[key][0] for key in order)
+    corrs = tuple(results[key][1] for key in order)
     return figures, corrs
 
 
