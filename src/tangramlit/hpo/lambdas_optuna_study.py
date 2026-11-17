@@ -38,7 +38,7 @@ def tune_loss_coefficients(
         lambda_count=1e-5,
         lambda_f_reg=1e-5,  
         study_name="loss_coefficients_tuning",        ########### optuna args
-        storage='/nfsd/sysbiobig/bazzaccoen/tangramlit_dev/',
+        storage=None,  # None: in-memory study. Pass a URL (e.g. "sqlite:///study.db") to persist or resume it
         n_trials=40,
         timeout=None,
         resume=False,
