@@ -1,5 +1,5 @@
 """
-Test script to validate spatial binning to generate cell type fraction priors for Tangram.
+Example script for spatial binning to generate cell type fraction priors for Tangram.
 Note that this extension requires annotation of the spatial data with cell type labels, and is not yet integrated into the main Tangram pipeline. 
 It is intended for testing and demonstration purposes.
 """
@@ -10,10 +10,14 @@ import squidpy as sq
 import numpy as np
 
 from tangramlit.data.spatial_binning import bfs_bin_growth, fps_seeds, compute_bin_celltype_fractions
+from pathlib import Path
+
+# Example data (not tracked by git): put the files in <repository>/data
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 def main():
-    adata_st = sc.read("C:/Users/enric/tangramlit_dev/data/test_slice200.h5ad")
+    adata_st = sc.read(DATA_DIR / "test_slice200.h5ad")
     print(adata_st)
 
     sq.gr.spatial_neighbors(adata_st, set_diag=False, key_added="spatial")

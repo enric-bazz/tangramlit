@@ -1,18 +1,24 @@
 """
-Test script for tangramlit mapping and analysis public API.
+Example script walking through the tangramlit mapping and analysis public API.
+Run it from anywhere: python examples/analysis.py
 """
 
 import yaml
 import anndata as ad
+import matplotlib.pyplot as plt
 import tangramlit as tgl
+from pathlib import Path
+
+# Example data (not tracked by git): put the files in <repository>/data
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 def load_data():
     # read adata
-    adata_sc = ad.read_h5ad("C:/Users/enric/tangramlit_dev/data/test_sc.h5ad")
-    adata_st = ad.read_h5ad("C:/Users/enric/tangramlit_dev/data/test_slice200.h5ad")
+    adata_sc = ad.read_h5ad(DATA_DIR / "test_sc.h5ad")
+    adata_st = ad.read_h5ad(DATA_DIR / "test_slice200.h5ad")
 
     # read config
-    with open(f"C:/Users/enric/tangramlit_dev/data/train_config.yaml", "r") as f:
+    with open(DATA_DIR / "train_config.yaml", "r") as f:
         config = yaml.safe_load(f)
 
     return (adata_sc, adata_st), config
@@ -108,6 +114,9 @@ def main():
 
     # Test analysis
     test_analysis(adata_sc=adata_sc, adata_st=adata_st, adata_map=adata_map, mapper=mapper, datamodule=datamodule, config=config)
+
+    # Plot functions return their figures without showing them
+    plt.show()
 
 
 if __name__ == "__main__":

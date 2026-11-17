@@ -1,5 +1,6 @@
 """
-Test script for Optuna tuning public API.
+Example script for the Optuna tuning public API.
+Run it from anywhere: python examples/optuna_tuning.py
 """
 
 import sys
@@ -8,20 +9,24 @@ import yaml
 import optuna
 import anndata as ad
 import tangramlit as tgl
+from pathlib import Path
+
+# Example data (not tracked by git): put the files in <repository>/data
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+OUT_DIR = Path(__file__).resolve().parents[1] / "out"
 
 
 def main():
     # Set study parameters
-    data_path = "C:/Users/enric/tangramlit_dev/data/"
-    adata_sc = ad.read_h5ad(data_path + "test_sc.h5ad")
-    adata_st = ad.read_h5ad(data_path + "test_slice200.h5ad")
+    adata_sc = ad.read_h5ad(DATA_DIR / "test_sc.h5ad")
+    adata_st = ad.read_h5ad(DATA_DIR / "test_slice200.h5ad")
     study_name = "api_test_study"
-    study_path = "C:/Users/enric/tangramlit_dev/out/"
-    storage = f"sqlite:///{study_path}tangram_tuning_api_test.db"
+    OUT_DIR.mkdir(exist_ok=True)
+    storage = f"sqlite:///{(OUT_DIR / 'tangram_tuning_api_test.db').as_posix()}"
     n_trials = 2    
     resume = False
 
-    with open(data_path + "train_config.yaml", "r") as f:
+    with open(DATA_DIR / "train_config.yaml", "r") as f:
         config = yaml.safe_load(f)
 
     random_state = config["random_state"]
@@ -44,10 +49,10 @@ def main():
         resume=True,
         )
 
-    with open(f"{study_path}{study_name}_best_params.yaml", "w") as f:
+    with open(OUT_DIR / f"{study_name}_best_params.yaml", "w") as f:
             yaml.dump(best_params, f, default_flow_style=False)
 
-    trials_df.to_csv(f"{study_path}{study_name}_trials.csv", index=False, sep=';')
+    trials_df.to_csv(OUT_DIR / f"{study_name}_trials.csv", index=False, sep=';')
  
 
 if __name__ == "__main__":
