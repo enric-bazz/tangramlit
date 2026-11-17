@@ -20,6 +20,7 @@ class PairedDataModule(LightningDataModule):
                  input_genes=None,
                  train_genes_names=None,
                  val_genes_names=None,
+                 test_genes_names=None,
                  cluster_label=None,
                  ):
         """
@@ -31,6 +32,7 @@ class PairedDataModule(LightningDataModule):
             input_genes (list): List of input genes to use for training. If None, use all genes shared between adata_sc and adata_st.
             train_genes_names (list): List of names of genes to use for training. If None, use all genes shared between adata_sc and adata_st.
             val_genes_names (list): List of names of genes to use for validation.
+            test_genes_names (list): List of names of genes to use for testing.
             cluster_label (str): Field in `adata_sc.obs` used for clustering/annotating single cell data.
         """
         super().__init__()
@@ -39,6 +41,7 @@ class PairedDataModule(LightningDataModule):
         self.input_genes = input_genes  # Allow passing specific genes for training
         self.train_genes_names = train_genes_names
         self.val_genes_names = val_genes_names
+        self.test_genes_names = test_genes_names
         self.cluster_label = cluster_label
 
         # Turn all input gene names to lowercase
@@ -48,6 +51,8 @@ class PairedDataModule(LightningDataModule):
             self.train_genes_names = [g.lower() for g in self.train_genes_names]
         if self.val_genes_names is not None:
             self.val_genes_names = [g.lower() for g in self.val_genes_names]
+        if self.test_genes_names is not None:
+            self.test_genes_names = [g.lower() for g in self.test_genes_names]
 
         # Compute spatial neighbors needed for the neighborhood extension of Tangram
         if not all(k in adata_st.obsp.keys() for k in ['spatial_connectivities', 'spatial_distances']):
@@ -115,13 +120,18 @@ class PairedDataModule(LightningDataModule):
             mask_st = self.adata_st.var.index.isin(input_genes) & self.adata_st.var.index.isin(self.val_genes_names)
             self.adata_sc.var["is_validation"] = mask_sc
             self.adata_st.var["is_validation"] = mask_st
+        if self.test_genes_names is not None:
+            mask_sc = self.adata_sc.var.index.isin(input_genes) & self.adata_sc.var.index.isin(self.test_genes_names)
+            mask_st = self.adata_st.var.index.isin(input_genes) & self.adata_st.var.index.isin(self.test_genes_names)
+            self.adata_sc.var["is_test"] = mask_sc
+            self.adata_st.var["is_test"] = mask_st
 
 
     def setup(self, stage: str):
         """
         Set up datasets for use in dataloaders.
         This method is called on every GPU separately.
-        Execute after prepare_data() and before train/val_dataloader().
+        Execute after prepare_data() and before train/val/test_dataloader().
         """
         self.train_dataset = AdataPairDataset(self.adata_sc,
                                               self.adata_st,
@@ -137,6 +147,16 @@ class PairedDataModule(LightningDataModule):
         # Warning message if no validation genes are provided
         if self.val_genes_names is None:
             logging.warning("No validation genes specified. Using all genes for validation.")
+        # The test dataset is only needed by trainer.test()
+        if stage == "test":
+            self.test_dataset = AdataPairDataset(self.adata_sc,
+                                                 self.adata_st,
+                                                 genes_names=self.test_genes_names,
+                                                 train=False,
+                                                 )
+            # Warning message if no test genes are provided
+            if self.test_genes_names is None:
+                logging.warning("No test genes specified. Using all genes for testing.")
 
 
     def train_dataloader(self):
@@ -159,6 +179,19 @@ class PairedDataModule(LightningDataModule):
         """
         return DataLoader(
             self.val_dataset,
+            batch_size=1,  # always use batch_size=1 as each item contains all data
+            shuffle=False,  # no need to shuffle as we have just one batch
+            num_workers=0,  # process in the main thread
+            pin_memory=True,  # speed up data transfer to GPU if using CUDA
+            collate_fn=lambda x: x[0]  # prevent adding batch dimension [1, n_cells/spots, n_genes] => [n_cells/spots, n_genes]
+        )
+
+    def test_dataloader(self):
+        """
+            Return a DataLoader for testing.
+        """
+        return DataLoader(
+            self.test_dataset,
             batch_size=1,  # always use batch_size=1 as each item contains all data
             shuffle=False,  # no need to shuffle as we have just one batch
             num_workers=0,  # process in the main thread

@@ -7,6 +7,7 @@ _lazy_modules = {
     "map_cells_to_space": ".mapping.trainer",
     "run_multiple_mappings": ".mapping.trainer",
     "validate_mapping_experiment": ".mapping.utils",
+    "test_mapping_experiment": ".mapping.utils",
     "project_sc_genes_onto_space": ".mapping.utils",
     "compare_spatial_geneexp": ".mapping.utils",
     # data

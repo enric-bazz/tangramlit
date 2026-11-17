@@ -42,6 +42,7 @@ def validate_mapping_inputs(
         lambda_geary=0,
         lambda_ct_islands=0,
         cluster_label=None,
+        test_genes_names=None,
 ):
     """
     Validates inputs for cell-to-space mapping functions in the Tangram framework.
@@ -88,6 +89,15 @@ def validate_mapping_inputs(
             raise ValueError("train_genes_names and val_genes_names must be valid indices.")
         elif set(train_genes_names).intersection(set(val_genes_names)):
             raise ValueError("train_genes_names and val_genes_names must not intersect.")
+
+    # Check that test_genes_names are valid and do not intersect the training and validation genes
+    if test_genes_names is not None:
+        test_genes_names = [g.lower() for g in test_genes_names]
+        if not set(test_genes_names) <= common_genes:
+            raise ValueError("test_genes_names must be valid indices.")
+        for other_genes_names in (train_genes_names, val_genes_names):
+            if other_genes_names is not None and set(test_genes_names).intersection(g.lower() for g in other_genes_names):
+                raise ValueError("test_genes_names must not intersect train_genes_names or val_genes_names.")
 
     # Validate training numerical parameters
     if num_epochs <= 0:
@@ -182,6 +192,7 @@ def map_cells_to_space(
         input_genes=None,
         train_genes_names=None,
         val_genes_names=None,
+        test_genes_names=None,
         filter=False,
         learning_rate=0.1,
         num_epochs=1000,
@@ -210,7 +221,7 @@ def map_cells_to_space(
 
     NOTE: `adata_sc` and `adata_st` are modified in place. Gene names are converted to lower case and made unique,
     cells with a missing `cluster_label` and spots with missing coordinates are removed, and the preprocessing
-    annotations are added (var['sparsity'], var['is_training'], var['is_validation'], uns['input_genes'],
+    annotations are added (var['sparsity'], var['is_training'], var['is_validation'], var['is_test'], uns['input_genes'],
     uns['overlap_genes'] and, if missing, the spatial neighbors graph of `adata_st`).
 
     Args:
@@ -219,6 +230,7 @@ def map_cells_to_space(
         input_genes (list): Optional. Training gene list. Must be a subset of the genes shared between modalities.
         train_genes_names (list): Optional. Gene indices used for training from the training gene list. Must be a subset of the genes shared between modalities.
         val_genes_names (list): Optional. Gene indices used for validation from the training gene list. Must be a subset of single cell data genes, possibly not in the spatial data.
+        test_genes_names (list): Optional. Gene indices held out for testing: never used by training or validation, scored by test_mapping_experiment(). Must be a subset of the genes shared between modalities.
         filter (bool): Whether the cell filter is active or not. Default is False.
         learning_rate (float): Optional. Learning rate for the optimizer. Default is 0.1.
         num_epochs (int): Optional. Number of epochs. Default is 1000.
@@ -263,6 +275,7 @@ def map_cells_to_space(
                         input_genes=input_genes,
                         train_genes_names=train_genes_names,
                         val_genes_names=val_genes_names,
+                        test_genes_names=test_genes_names,
                         cluster_label=cluster_label,
                         )
 

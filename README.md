@@ -58,7 +58,7 @@ two `.h5ad` files and a YAML configuration from an input directory and writes it
 
 ```bash
 # Train a spatial mapping model
-tangramlit train -i /path/to/input_dir -sc sc_data.h5ad -ist spatial_data.h5ad -c config.yaml -o /path/to/output_dir --validate
+tangramlit train -i /path/to/input_dir -sc sc_data.h5ad -ist spatial_data.h5ad -c config.yaml -o /path/to/output_dir --validate --test
 
 # Tune loss hyperparameters
 tangramlit tune -i /path/to/input_dir -sc sc_data.h5ad -ist spatial_data.h5ad -c config.yaml -o /path/to/output_dir --n-trials 100
@@ -72,7 +72,7 @@ The configuration file holds the keyword arguments of `map_cells_to_space` (loss
 
 | Command | Output files |
 |---|---|
-| `train` | `adata_map.h5ad`, `training_results.yaml`; with `--validate` also `validation_results.yaml` and `spatial_gene_comparison.csv` |
+| `train` | `adata_map.h5ad`, `training_results.yaml`; with `--validate` also `validation_results.yaml` and `spatial_gene_comparison.csv`; with `--test` also `test_results.yaml` |
 | `tune` | `<study>_best_params.yaml`, `<study>_trials.csv`, and `<study>.db` unless `--storage` is given |
 | `cv` | `cv_metrics.yaml`, `cv_metrics_per_fold.csv` |
 
@@ -99,17 +99,22 @@ A minimal mapping, with `adata_sc` and `adata_st` two AnnData objects (the spati
 ```python
 import tangramlit as tgl
 
-train_genes, val_genes, _ = tgl.split_train_val_test_genes(adata_sc, adata_st, random_state=0)
+# Training genes enter the loss, validation genes drive early stopping, test genes are only scored at the end
+train_genes, val_genes, test_genes = tgl.split_train_val_test_genes(adata_sc, adata_st, random_state=0)
 adata_map, mapper, datamodule = tgl.map_cells_to_space(
     adata_sc,
     adata_st,
     train_genes_names=train_genes,
     val_genes_names=val_genes,
+    test_genes_names=test_genes,
     lambda_g1=1,
     lambda_d=1e-3,
     num_epochs=500,
     random_state=0,
 )
+
+# Score the mapping on the held-out test genes
+test_results = tgl.test_mapping_experiment(mapper, datamodule)[0]
 
 # Project single-cell expression onto space and score it gene by gene
 adata_ge = tgl.project_sc_genes_onto_space(adata_map, datamodule)

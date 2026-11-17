@@ -7,6 +7,7 @@ Outputs written to the specified output directory:
   {output_dir}/adata_map.h5ad          # Mapped single-cell data
   {output_dir}/training_results.yaml   # Training metadata
   {output_dir}/validation_results.yaml # (optional) Validation metrics
+  {output_dir}/test_results.yaml       # (optional) Test metrics
   {output_dir}/spatial_gene_comparison.csv  # (optional) Validation data
 """
 
@@ -55,6 +56,7 @@ def register(subparsers):
     
     # Optional arguments
     parser.add_argument('--validate', action='store_true', help='Run validation and generate validation plots')
+    parser.add_argument('--test', action='store_true', help='Score the mapping on the held-out test genes')
     parser.add_argument('--device', default='auto', help='Device to use for training (cpu, cuda, or auto)')
     parser.add_argument('--dry-run', action='store_true', help='Only check files and config, do not train')
     
@@ -68,7 +70,7 @@ def run(args):
     from pathlib import Path
 
     from ..mapping.trainer import map_cells_to_space
-    from ..mapping.utils import validate_mapping_experiment, project_sc_genes_onto_space, compare_spatial_geneexp
+    from ..mapping.utils import validate_mapping_experiment, test_mapping_experiment, project_sc_genes_onto_space, compare_spatial_geneexp
     from ..data import split_train_val_test_genes
 
     # Convert to absolute paths
@@ -102,14 +104,14 @@ def run(args):
     adata_sc = sc.read_h5ad(input_dir / args.scrna_name)
     adata_st = sc.read_h5ad(input_dir / args.ist_name)
 
-    # Quick split genes to get train/val lists
-    train_genes, val_genes, _ = split_train_val_test_genes(
+    # Quick split genes to get train/val/test lists
+    train_genes, val_genes, test_genes = split_train_val_test_genes(
         adata_sc,
         adata_st,
         random_state=random_state
     )
 
-    print(f"Train genes: {len(train_genes)}, Val genes: {len(val_genes)}")
+    print(f"Train genes: {len(train_genes)}, Val genes: {len(val_genes)}, Test genes: {len(test_genes)}")
 
     if args.dry_run:
         print("Dry run: validation complete. Exiting.")
@@ -122,6 +124,7 @@ def run(args):
         adata_st=adata_st,
         train_genes_names=train_genes,
         val_genes_names=val_genes,
+        test_genes_names=test_genes,
         device=args.device,
         **config
     )
@@ -137,6 +140,7 @@ def run(args):
     metadata = {
         'n_train_genes': len(train_genes),
         'n_val_genes': len(val_genes),
+        'n_test_genes': len(test_genes),
         'mapper_type': mapper.__class__.__name__,
         'config': config,
     }
@@ -168,6 +172,17 @@ def run(args):
             
         except Exception as e:
             print(f"Warning: Validation failed: {e}", file=sys.stderr)
+
+    # Test if requested
+    if args.test:
+        print("Running test...")
+        results = test_mapping_experiment(mapper, datamodule)
+
+        # Save test results
+        out_test = os.path.join(output_dir, "test_results.yaml")
+        with open(out_test, 'w') as f:
+            yaml.dump(results, f)
+        print(f"Saved test results to: {out_test}")
 
     print("Training completed.")
 

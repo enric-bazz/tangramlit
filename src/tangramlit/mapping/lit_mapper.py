@@ -392,19 +392,20 @@ class MapperLightning(LightningModule):
         print(f"G matrix shape: {batch['G'].shape}")
 
 
-    def validation_step(self, batch):
+    def _evaluation_step(self, batch, prefix):
         """
-        Compute the validation terms in val_dict: score, spatial sparsity weighted score, auc, entropy.
+        Compute the terms shared by validation_step() and test_step(): score, spatial sparsity weighted score, auc, entropy.
 
         Args:
-            batch: full validation batch.
+            batch: full validation or test batch.
+            prefix (str): 'val' or 'test', prepended to the name of each term.
 
         Returns:
-            Logs a dictionary of validation terms:  Validation Score, Sparsity-weighted Score, AUC, Entropy
+            Dictionary of terms: Score, Sparsity-weighted Score, AUC, Entropy
        """
-        # Get validation data
-        S_val = batch['S']  # single-cell data (test genes)
-        G_val = batch['G']  # spatial data (test genes)
+        # Get held-out data
+        S_val = batch['S']  # single-cell data (validation or test genes)
+        G_val = batch['G']  # spatial data (validation or test genes)
 
         # Run "forward" pass and prediction
         if self.hparams.filter:
@@ -428,16 +429,43 @@ class MapperLightning(LightningModule):
         auc_score, _ = poly2_auc(gv_scores, gene_sparsity, plot_auc=plot_auc)  # skip coordinates
         # Entropy of the mapping probabilities
         prob_entropy = - torch.mean(torch.sum((torch.log(M_probs) * M_probs), dim=1) / np.log(M_probs.shape[1]))
-        # Validation dictionary
-        val_dict = {'val_score': gv_scores.mean(),
-                    'val_sparsity-weighted_score': sp_sparsity_weighted_scores.sum(),
-                    'val_AUC': auc_score,
-                    'val_entropy': prob_entropy,
-                    }
+        return {f'{prefix}_score': gv_scores.mean(),
+                f'{prefix}_sparsity-weighted_score': sp_sparsity_weighted_scores.sum(),
+                f'{prefix}_AUC': auc_score,
+                f'{prefix}_entropy': prob_entropy,
+                }
+
+    def validation_step(self, batch):
+        """
+        Compute the validation terms in val_dict: score, spatial sparsity weighted score, auc, entropy.
+
+        Args:
+            batch: full validation batch.
+
+        Returns:
+            Logs a dictionary of validation terms:  Validation Score, Sparsity-weighted Score, AUC, Entropy
+       """
+        val_dict = self._evaluation_step(batch, prefix='val')
 
         self.log_dict(val_dict, prog_bar=True, logger=True, on_epoch=True)
 
         return val_dict
+
+    def test_step(self, batch):
+        """
+        Compute the test terms in test_dict: the same terms as validation_step(), on the test genes.
+
+        Args:
+            batch: full test batch.
+
+        Returns:
+            Logs a dictionary of test terms:  Test Score, Sparsity-weighted Score, AUC, Entropy
+       """
+        test_dict = self._evaluation_step(batch, prefix='test')
+
+        self.log_dict(test_dict, prog_bar=False, logger=True, on_epoch=True)
+
+        return test_dict
 
     def on_validation_start(self):
         """
@@ -463,6 +491,16 @@ class MapperLightning(LightningModule):
                     self.val_history[key] = []
                 if not self.trainer.sanity_checking:
                     self.val_history[key].append(value)
+
+
+    def on_test_start(self):
+        """
+        Print dataset dimensions at the start of testing.
+        """
+        batch = next(iter(self.trainer.datamodule.test_dataloader()))
+        print(f"\nTesting with {batch['genes_number']} genes")
+        print(f"S matrix shape: {batch['S'].shape}")
+        print(f"G matrix shape: {batch['G'].shape}")
 
 
 # TODO: return both aggregated and gene-specific metrics during training and validation

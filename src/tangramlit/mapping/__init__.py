@@ -7,6 +7,7 @@ from .trainer import (
 )
 from .utils import (
     validate_mapping_experiment,
+    test_mapping_experiment,
     project_sc_genes_onto_space,
     compare_spatial_geneexp,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "validate_mapping_inputs",
     "project_sc_genes_onto_space",
     "validate_mapping_experiment",
+    "test_mapping_experiment",
     "compare_spatial_geneexp",
     "MapperLightning",
     "EpochProgressBar",
