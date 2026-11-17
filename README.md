@@ -11,6 +11,18 @@ This repository contains a reimplementation of Tangram in PyTorch Lightning that
 
 ---
 
+## Installation
+
+```bash
+pip install git+https://github.com/enric-bazz/tangramlit.git
+```
+
+To work on the package, clone the repository and run `uv sync`: it recreates the development
+environment recorded in `uv.lock`. The tests run with `uv run pytest`, and `examples/` contains
+scripts that walk through the public API.
+
+---
+
 ## Supported Modes
 
 Currently supported:
@@ -37,29 +49,43 @@ Accordingly:
 * `rna_count_based` priors are not supported
 * Custom density priors are not yet implemented
 
-### Command-Line Interface (CLI)
+---
 
-The `tangramlit` package provides a CLI to run common workflows without writing Python code. After installing the package, you can use the following commands:
+## Command-Line Interface (CLI)
+
+The `tangramlit` package provides a CLI to run common workflows without writing Python code. Each command reads
+two `.h5ad` files and a YAML configuration from an input directory and writes its results to an output directory:
 
 ```bash
 # Train a spatial mapping model
-tangramlit train
+tangramlit train -i /path/to/input_dir -sc sc_data.h5ad -ist spatial_data.h5ad -c config.yaml -o /path/to/output_dir --validate
 
 # Tune loss hyperparameters
-tangramlit tune
+tangramlit tune -i /path/to/input_dir -sc sc_data.h5ad -ist spatial_data.h5ad -c config.yaml -o /path/to/output_dir --n-trials 100
 
 # Cross-validate genes mapping
-tangramlit cv
+tangramlit cv -i /path/to/input_dir -sc sc_data.h5ad -ist spatial_data.h5ad -c config.yaml -o /path/to/output_dir --k-folds 5
 ```
 
-Further detais and examples with:
+The configuration file holds the keyword arguments of `map_cells_to_space` (loss coefficients, `filter`,
+`num_epochs`, `random_state`, `cluster_label`, ...).
 
-``` bash
-# Show help for all commands
+| Command | Output files |
+|---|---|
+| `train` | `adata_map.h5ad`, `training_results.yaml`; with `--validate` also `validation_results.yaml` and `spatial_gene_comparison.csv` |
+| `tune` | `<study>_best_params.yaml`, `<study>_trials.csv`, and `<study>.db` unless `--storage` is given |
+| `cv` | `cv_metrics.yaml`, `cv_metrics_per_fold.csv` |
+
+Further details and options with:
+
+```bash
 tangramlit --help
+tangramlit train --help
 ```
 
-### Public API
+---
+
+## Public API
 
 In addition to the CLI, `tangramlit` exposes a Python API for interactive use in scripts or notebooks. It is largely consistent with the original Tangram API, with extensions for:
 
@@ -67,3 +93,33 @@ In addition to the CLI, `tangramlit` exposes a Python API for interactive use in
 - Plotting and visualization  
 - Mapping validation and benchmarking  
 - Hyperparameter optimization.
+
+A minimal mapping, with `adata_sc` and `adata_st` two AnnData objects (the spatial one with coordinates in `obsm['spatial']`):
+
+```python
+import tangramlit as tgl
+
+train_genes, val_genes, _ = tgl.split_train_val_test_genes(adata_sc, adata_st, random_state=0)
+adata_map, mapper, datamodule = tgl.map_cells_to_space(
+    adata_sc,
+    adata_st,
+    train_genes_names=train_genes,
+    val_genes_names=val_genes,
+    lambda_g1=1,
+    lambda_d=1e-3,
+    num_epochs=500,
+    random_state=0,
+)
+
+# Project single-cell expression onto space and score it gene by gene
+adata_ge = tgl.project_sc_genes_onto_space(adata_map, datamodule)
+per_gene = tgl.compare_spatial_geneexp(adata_ge, datamodule)       # cosine similarity score
+per_gene = tgl.benchmark_mapping(adata_ge, datamodule, per_gene)   # adds PCC, RMSE, JS, SSIM
+```
+
+Notes:
+
+- Mapping modifies the input AnnData objects in place: gene names are converted to lower case,
+  cells or spots with missing labels or coordinates are removed, and preprocessing annotations are added.
+- Plotting functions return their matplotlib figure(s) and do not call `plt.show()`: figures are displayed
+  automatically in notebooks, while scripts have to save or show them.
