@@ -20,6 +20,7 @@ class PairedDataModule(LightningDataModule):
                  input_genes=None,
                  train_genes_names=None,
                  val_genes_names=None,
+                 test_genes_names=None,
                  cluster_label=None,
                  ):
         """
@@ -31,6 +32,7 @@ class PairedDataModule(LightningDataModule):
             input_genes (list): List of input genes to use for training. If None, use all genes shared between adata_sc and adata_st.
             train_genes_names (list): List of names of genes to use for training. If None, use all genes shared between adata_sc and adata_st.
             val_genes_names (list): List of names of genes to use for validation.
+            test_genes_names (list): List of names of genes to use for testing.
             cluster_label (str): Field in `adata_sc.obs` used for clustering/annotating single cell data.
         """
         super().__init__()
@@ -39,6 +41,7 @@ class PairedDataModule(LightningDataModule):
         self.input_genes = input_genes  # Allow passing specific genes for training
         self.train_genes_names = train_genes_names
         self.val_genes_names = val_genes_names
+        self.test_genes_names = test_genes_names
         self.cluster_label = cluster_label
 
         # Turn all input gene names to lowercase
@@ -48,6 +51,8 @@ class PairedDataModule(LightningDataModule):
             self.train_genes_names = [g.lower() for g in self.train_genes_names]
         if self.val_genes_names is not None:
             self.val_genes_names = [g.lower() for g in self.val_genes_names]
+        if self.test_genes_names is not None:
+            self.test_genes_names = [g.lower() for g in self.test_genes_names]
 
         # Compute spatial neighbors needed for the neighborhood extension of Tangram
         if not all(k in adata_st.obsp.keys() for k in ['spatial_connectivities', 'spatial_distances']):
@@ -60,7 +65,7 @@ class PairedDataModule(LightningDataModule):
         By default, the training genes set is made of the shared genes that are expressed in at least one obs in both datasets.
         Executed before setup() in the trainer.fit call.
         """
-        # Preprocess data - define adata.uns['training_genes'] - originally implemented in tg.mapping_utils.pp_adatas()
+        # Preprocess data - define adata.uns['input_genes'] - originally implemented in tg.mapping_utils.pp_adatas()
         print("Preprocessing data...")
 
         # 1. Put all var indexes to lower case to align
@@ -89,39 +94,44 @@ class PairedDataModule(LightningDataModule):
         filtered_genes_st = self.adata_st[:, filtered_genes_st].var_names
         overlap_filtered_genes = set(filtered_genes_sc) & set(filtered_genes_st)
 
-        # 6. Define training genes as intersection of input training genes and overlapping filtered genes
+        # 6. Define input genes (all genes used by the mapping) as intersection of user input genes and overlapping filtered genes
         if self.input_genes is not None:
-            training_genes = list(set(self.input_genes) & overlap_filtered_genes)
-            print(f"Using {len(training_genes)} training genes provided by user.")
+            input_genes = list(set(self.input_genes) & overlap_filtered_genes)
+            print(f"Using {len(input_genes)} input genes provided by user.")
         else:
-            training_genes = list(overlap_filtered_genes)
-        print(f"Using {len(training_genes)} shared marker genes.")
+            input_genes = list(overlap_filtered_genes)
+        print(f"Using {len(input_genes)} shared marker genes.")
 
-        # 7. Annotate training genes set in adata.uns['training_genes'] and adata.var['is_training']
-        self.adata_sc.uns["training_genes"] = training_genes
-        self.adata_st.uns["training_genes"] = training_genes
+        # 7. Annotate input genes set in adata.uns['input_genes'] and adata.var['is_training']
+        self.adata_sc.uns["input_genes"] = input_genes
+        self.adata_st.uns["input_genes"] = input_genes
         if self.train_genes_names is None:
-            self.adata_sc.var["is_training"] = self.adata_sc.var.index.isin(training_genes)
-            self.adata_st.var["is_training"] = self.adata_st.var.index.isin(training_genes)
+            self.adata_sc.var["is_training"] = self.adata_sc.var.index.isin(input_genes)
+            self.adata_st.var["is_training"] = self.adata_st.var.index.isin(input_genes)
         else:
-            mask_sc = self.adata_sc.var.index.isin(training_genes) & self.adata_sc.var.index.isin(self.train_genes_names)
-            mask_st = self.adata_st.var.index.isin(training_genes) & self.adata_st.var.index.isin(self.train_genes_names)
+            mask_sc = self.adata_sc.var.index.isin(input_genes) & self.adata_sc.var.index.isin(self.train_genes_names)
+            mask_st = self.adata_st.var.index.isin(input_genes) & self.adata_st.var.index.isin(self.train_genes_names)
             self.adata_sc.var["is_training"] = mask_sc
             self.adata_st.var["is_training"] = mask_st
-        # NOTE: adata.var['is_training'] == True iff the gene is both in the filtered shared genes (trainig_genes) and,
+        # NOTE: adata.var['is_training'] == True iff the gene is both in the filtered shared genes (input_genes) and,
         # if applicable, also selected in train_genes_names
         if self.val_genes_names is not None:
-            mask_sc = self.adata_sc.var.index.isin(training_genes) & self.adata_sc.var.index.isin(self.val_genes_names)
-            mask_st = self.adata_st.var.index.isin(training_genes) & self.adata_st.var.index.isin(self.val_genes_names)
+            mask_sc = self.adata_sc.var.index.isin(input_genes) & self.adata_sc.var.index.isin(self.val_genes_names)
+            mask_st = self.adata_st.var.index.isin(input_genes) & self.adata_st.var.index.isin(self.val_genes_names)
             self.adata_sc.var["is_validation"] = mask_sc
             self.adata_st.var["is_validation"] = mask_st
+        if self.test_genes_names is not None:
+            mask_sc = self.adata_sc.var.index.isin(input_genes) & self.adata_sc.var.index.isin(self.test_genes_names)
+            mask_st = self.adata_st.var.index.isin(input_genes) & self.adata_st.var.index.isin(self.test_genes_names)
+            self.adata_sc.var["is_test"] = mask_sc
+            self.adata_st.var["is_test"] = mask_st
 
 
     def setup(self, stage: str):
         """
         Set up datasets for use in dataloaders.
         This method is called on every GPU separately.
-        Execute after prepare_data() and before train/val_dataloader().
+        Execute after prepare_data() and before train/val/test_dataloader().
         """
         self.train_dataset = AdataPairDataset(self.adata_sc,
                                               self.adata_st,
@@ -137,6 +147,16 @@ class PairedDataModule(LightningDataModule):
         # Warning message if no validation genes are provided
         if self.val_genes_names is None:
             logging.warning("No validation genes specified. Using all genes for validation.")
+        # The test dataset is only needed by trainer.test()
+        if stage == "test":
+            self.test_dataset = AdataPairDataset(self.adata_sc,
+                                                 self.adata_st,
+                                                 genes_names=self.test_genes_names,
+                                                 train=False,
+                                                 )
+            # Warning message if no test genes are provided
+            if self.test_genes_names is None:
+                logging.warning("No test genes specified. Using all genes for testing.")
 
 
     def train_dataloader(self):
@@ -159,6 +179,19 @@ class PairedDataModule(LightningDataModule):
         """
         return DataLoader(
             self.val_dataset,
+            batch_size=1,  # always use batch_size=1 as each item contains all data
+            shuffle=False,  # no need to shuffle as we have just one batch
+            num_workers=0,  # process in the main thread
+            pin_memory=True,  # speed up data transfer to GPU if using CUDA
+            collate_fn=lambda x: x[0]  # prevent adding batch dimension [1, n_cells/spots, n_genes] => [n_cells/spots, n_genes]
+        )
+
+    def test_dataloader(self):
+        """
+            Return a DataLoader for testing.
+        """
+        return DataLoader(
+            self.test_dataset,
             batch_size=1,  # always use batch_size=1 as each item contains all data
             shuffle=False,  # no need to shuffle as we have just one batch
             num_workers=0,  # process in the main thread

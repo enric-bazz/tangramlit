@@ -42,6 +42,7 @@ def validate_mapping_inputs(
         lambda_geary=0,
         lambda_ct_islands=0,
         cluster_label=None,
+        test_genes_names=None,
 ):
     """
     Validates inputs for cell-to-space mapping functions in the Tangram framework.
@@ -88,6 +89,15 @@ def validate_mapping_inputs(
             raise ValueError("train_genes_names and val_genes_names must be valid indices.")
         elif set(train_genes_names).intersection(set(val_genes_names)):
             raise ValueError("train_genes_names and val_genes_names must not intersect.")
+
+    # Check that test_genes_names are valid and do not intersect the training and validation genes
+    if test_genes_names is not None:
+        test_genes_names = [g.lower() for g in test_genes_names]
+        if not set(test_genes_names) <= common_genes:
+            raise ValueError("test_genes_names must be valid indices.")
+        for other_genes_names in (train_genes_names, val_genes_names):
+            if other_genes_names is not None and set(test_genes_names).intersection(g.lower() for g in other_genes_names):
+                raise ValueError("test_genes_names must not intersect train_genes_names or val_genes_names.")
 
     # Validate training numerical parameters
     if num_epochs <= 0:
@@ -182,6 +192,7 @@ def map_cells_to_space(
         input_genes=None,
         train_genes_names=None,
         val_genes_names=None,
+        test_genes_names=None,
         filter=False,
         learning_rate=0.1,
         num_epochs=1000,
@@ -210,7 +221,7 @@ def map_cells_to_space(
 
     NOTE: `adata_sc` and `adata_st` are modified in place. Gene names are converted to lower case and made unique,
     cells with a missing `cluster_label` and spots with missing coordinates are removed, and the preprocessing
-    annotations are added (var['sparsity'], var['is_training'], var['is_validation'], uns['training_genes'],
+    annotations are added (var['sparsity'], var['is_training'], var['is_validation'], var['is_test'], uns['input_genes'],
     uns['overlap_genes'] and, if missing, the spatial neighbors graph of `adata_st`).
 
     Args:
@@ -219,6 +230,7 @@ def map_cells_to_space(
         input_genes (list): Optional. Training gene list. Must be a subset of the genes shared between modalities.
         train_genes_names (list): Optional. Gene indices used for training from the training gene list. Must be a subset of the genes shared between modalities.
         val_genes_names (list): Optional. Gene indices used for validation from the training gene list. Must be a subset of single cell data genes, possibly not in the spatial data.
+        test_genes_names (list): Optional. Gene indices held out for testing: never used by training or validation, scored by test_mapping_experiment(). Must be a subset of the genes shared between modalities.
         filter (bool): Whether the cell filter is active or not. Default is False.
         learning_rate (float): Optional. Learning rate for the optimizer. Default is 0.1.
         num_epochs (int): Optional. Number of epochs. Default is 1000.
@@ -244,7 +256,7 @@ def map_cells_to_space(
 
     Returns:
         A cell-by-spot AnnData containing the probability of mapping cell i on spot j.
-        The `uns` field of the returned AnnData contains the training genes.
+        The `uns` field of the returned AnnData contains the input genes (`uns['input_genes']`): all genes used by the mapping, whatever their split.
         The loss terms history is stored in adata_map.uns['training_history'].
         If 'filter' is True, the `uns` field also contains the filter values and the number of selected cells during each epoch.
         The final filter values are stored in adata_map.obs['F_out'].
@@ -263,6 +275,7 @@ def map_cells_to_space(
                         input_genes=input_genes,
                         train_genes_names=train_genes_names,
                         val_genes_names=val_genes_names,
+                        test_genes_names=test_genes_names,
                         cluster_label=cluster_label,
                         )
 
@@ -312,16 +325,16 @@ def map_cells_to_space(
 
     # Save results
     logging.info("Saving results...")
-    # Retrieve final training genes (after preprocessing) from DataModule
-    training_genes = data.adata_sc.uns['training_genes']  # available after trainer.fit()
+    # Retrieve final input genes (after preprocessing) from DataModule
+    input_genes = data.adata_sc.uns['input_genes']  # available after trainer.fit()
     # Create AnnData object with the final mapping matrix
     adata_map = sc.AnnData(
         X=final_mapping,
-        obs=data.adata_sc[:, training_genes].obs.copy(),
-        var=data.adata_st[:, training_genes].obs.copy(),
+        obs=data.adata_sc[:, input_genes].obs.copy(),
+        var=data.adata_st[:, input_genes].obs.copy(),
     )
-    # Store training genes in adata_map.uns['training_genes']
-    adata_map.uns['training_genes'] = training_genes
+    # Store input genes in adata_map.uns['input_genes']
+    adata_map.uns['input_genes'] = input_genes
     # Store final filter values in adata_map.obs['F_out']
     if filter:
         adata_map.obs["F_out"] = final_filter

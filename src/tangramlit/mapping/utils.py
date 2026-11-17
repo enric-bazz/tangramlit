@@ -28,6 +28,26 @@ def validate_mapping_experiment(model, datamodule, experiment_name=None):
     return validation_dict
 
 
+def test_mapping_experiment(model, datamodule, experiment_name=None):
+    """
+    Test mapping experiment on the held-out test genes. The model must be already trained --> Run only after map_cells_to_space().
+
+    Returns:
+        test_results (dict): Dictionary containing test results with
+        dict_keys(['test_score', 'test_sparsity-weighted_score', 'test_AUC', 'test_entropy']).
+        Note that when called as 'results = test_mapping_experiment(model, datamodule)', results is a list with
+        element results[0] containing the dictionary.
+    """
+    test_logger = TensorBoardLogger("tb_logs", name=f"test_{experiment_name}")
+    trainer = lp.Trainer(
+        logger=test_logger,
+        enable_progress_bar=False,  # disable progress bar
+    )
+    test_dict = trainer.test(model=model, datamodule=datamodule)
+
+    return test_dict
+
+
 
 def project_sc_genes_onto_space(adata_map, datamodule):
     """
@@ -41,18 +61,20 @@ def project_sc_genes_onto_space(adata_map, datamodule):
     Returns:
         AnnData: spot-by-gene AnnData containing spatial gene expression from the single cell data.
     """
-    # Subset single-cell genes to those marked as training or validation
+    # Subset single-cell genes to those marked as training, validation or test
     sc_var = datamodule.adata_sc.var
     # Prepare boolean Series for mask (handle missing columns)
     is_train = sc_var.get("is_training", pd.Series(False, index=sc_var.index))
     is_val = sc_var.get("is_validation", pd.Series(False, index=sc_var.index))
+    is_test = sc_var.get("is_test", pd.Series(False, index=sc_var.index))
     # Ensure boolean dtype and fill NaNs
     is_train = is_train.fillna(False).astype(bool)
     is_val = is_val.fillna(False).astype(bool)
+    is_test = is_test.fillna(False).astype(bool)
 
-    gene_mask = (is_train | is_val).values
+    gene_mask = (is_train | is_val | is_test).values
     if gene_mask.sum() == 0:
-        raise ValueError("No genes selected for projection: no 'is_training' or 'is_validation' True in datamodule.adata_sc.var")
+        raise ValueError("No genes selected for projection: no 'is_training', 'is_validation' or 'is_test' True in datamodule.adata_sc.var")
 
     # Create a local subset of the single-cell AnnData (do not mutate original datamodule)
     adata_sc_sub = datamodule.adata_sc[:, gene_mask].copy()
@@ -72,7 +94,7 @@ def project_sc_genes_onto_space(adata_map, datamodule):
         uns=adata_sc_sub.uns,  # unstructured fields of sc data 
     )
 
-    # Annotate training and validation flags in adata_ge.var
+    # Annotate training, validation and test flags in adata_ge.var
     # If the original sc var had these columns, copy them; otherwise set False
     if "is_training" in adata_sc_sub.var.columns:
         adata_ge.var["is_training"] = adata_sc_sub.var["is_training"].astype(bool)
@@ -83,6 +105,11 @@ def project_sc_genes_onto_space(adata_map, datamodule):
         adata_ge.var["is_validation"] = adata_sc_sub.var["is_validation"].astype(bool)
     else:
         adata_ge.var["is_validation"] = False
+
+    if "is_test" in adata_sc_sub.var.columns:
+        adata_ge.var["is_test"] = adata_sc_sub.var["is_test"].astype(bool)
+    else:
+        adata_ge.var["is_test"] = False
 
     return adata_ge
 
@@ -95,7 +122,7 @@ def compare_spatial_geneexp(adata_ge, datamodule):
     datasets (and non-zero in both), the function computes:
       - cosine similarity (returned in column ``score``)
 
-    The returned DataFrame also contains ``is_training``, ``is_validation``,
+    The returned DataFrame also contains ``is_training``, ``is_validation``, ``is_test``,
     ``sparsity_st``, ``sparsity_sc`` and ``sparsity_diff`` for downstream
     analysis.
 
@@ -113,7 +140,7 @@ def compare_spatial_geneexp(adata_ge, datamodule):
     Returns:
         pd.DataFrame: Per-gene metrics indexed by gene name. Columns include
         ``score``, ``is_training``,
-        ``is_validation``, ``sparsity_st``, ``sparsity_sc``, ``sparsity_diff``.
+        ``is_validation``, ``is_test``, ``sparsity_st``, ``sparsity_sc``, ``sparsity_diff``.
     """
     # Use genes present in the generated data (`adata_ge`) intersecting with spatial genes
     genes_ge = list(adata_ge.var_names)
@@ -156,10 +183,11 @@ def compare_spatial_geneexp(adata_ge, datamodule):
     df_g = pd.DataFrame(cos_sims, index=selected_genes, columns=["score"])
     df_g.index.name = "gene"
 
-    # Annotate training/validation flags from spatial var (preferred)
+    # Annotate training/validation/test flags from spatial var (preferred)
     st_var = datamodule.adata_st[:, selected_genes].var
     df_g["is_training"] = st_var.get("is_training", pd.Series(False, index=st_var.index)).astype(bool)
     df_g["is_validation"] = st_var.get("is_validation", pd.Series(False, index=st_var.index)).astype(bool)
+    df_g["is_test"] = st_var.get("is_test", pd.Series(False, index=st_var.index)).astype(bool)
 
 
     # Add spatial sparsity - indexes are already aligned

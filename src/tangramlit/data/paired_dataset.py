@@ -31,14 +31,14 @@ class AdataPairDataset(Dataset):
 
         
         self.train=train
-        # Get training genes from adata.uns['training_genes'] - defined in LightningDataModule.prepare_data()
-        training_genes = adata_sc.uns['training_genes']
+        # Get input genes (all genes used by the mapping, whatever their split) from adata.uns['input_genes'] - defined in LightningDataModule.prepare_data()
+        input_genes = adata_sc.uns['input_genes']
 
         # S matrix (single-cell)
         if isinstance(adata_sc.X, csc_matrix) or isinstance(adata_sc.X, csr_matrix):
-            self.S = torch.tensor(adata_sc[:, training_genes].X.toarray(), dtype=torch.float32)
+            self.S = torch.tensor(adata_sc[:, input_genes].X.toarray(), dtype=torch.float32)
         elif isinstance(adata_sc.X, np.ndarray):
-            self.S = torch.tensor(adata_sc[:, training_genes].X, dtype=torch.float32)
+            self.S = torch.tensor(adata_sc[:, input_genes].X, dtype=torch.float32)
         else:
             X_type = type(adata_sc.X)
             logging.error(f"Single-cell AnnData X has unrecognized type: {X_type}")
@@ -46,9 +46,9 @@ class AdataPairDataset(Dataset):
 
         # G matrix (spatial)
         if isinstance(adata_st.X, csc_matrix) or isinstance(adata_st.X, csr_matrix):
-            self.G = torch.tensor(adata_st[:, training_genes].X.toarray(), dtype=torch.float32)
+            self.G = torch.tensor(adata_st[:, input_genes].X.toarray(), dtype=torch.float32)
         elif isinstance(adata_st.X, np.ndarray):
-            self.G = torch.tensor(adata_st[:, training_genes].X, dtype=torch.float32)
+            self.G = torch.tensor(adata_st[:, input_genes].X, dtype=torch.float32)
         else:
             X_type = type(adata_st.X)
             logging.error(f"Spatial AnnData X has unrecognized type: {X_type}")
@@ -91,10 +91,10 @@ class AdataPairDataset(Dataset):
         # Since this behavior might be undesirable, a warning message is displayed after the AdataPairDataset() call in setup()
 
         # Store metadata
-        self.training_genes = training_genes
+        self.input_genes = input_genes
         self.n_cells = self.S.shape[0]
         self.n_spots = self.G.shape[0]
-        self.n_genes = len(training_genes)
+        self.n_genes = len(input_genes)
 
     def __len__(self):
         return 1
@@ -126,7 +126,7 @@ class AdataPairDataset(Dataset):
 def gene_names_to_indices(gene_names, adata):
     """
         Get indices of genes in AnnData object's var, handling case sensitivity.
-        Only includes genes that are present in adata.uns['training_genes'].
+        Only includes genes that are present in adata.uns['input_genes'].
 
         Args:
             gene_names (list): List of gene names to find indices for
@@ -137,7 +137,7 @@ def gene_names_to_indices(gene_names, adata):
 
         Raises:
             ValueError: If any gene name is not found in the AnnData object
-            KeyError: If 'training_genes' is not present in adata.uns
+            KeyError: If 'input_genes' is not present in adata.uns
     """
 
     # Find indices for each gene name
@@ -146,9 +146,9 @@ def gene_names_to_indices(gene_names, adata):
 
     for gene in gene_names:
         gene_lower = gene.lower()
-        # Check if gene is in training_genes
-        if gene_lower in adata.uns['training_genes']:
-            indices.append(adata.uns['training_genes'].index(gene_lower))
+        # Check if gene is in input_genes
+        if gene_lower in adata.uns['input_genes']:
+            indices.append(adata.uns['input_genes'].index(gene_lower))
         else:
             missing_genes.append(gene)  # use .item() if array
 
