@@ -210,7 +210,7 @@ def map_cells_to_space(
 
     NOTE: `adata_sc` and `adata_st` are modified in place. Gene names are converted to lower case and made unique,
     cells with a missing `cluster_label` and spots with missing coordinates are removed, and the preprocessing
-    annotations are added (var['sparsity'], var['is_training'], var['is_validation'], uns['training_genes'],
+    annotations are added (var['sparsity'], var['is_training'], var['is_validation'], uns['input_genes'],
     uns['overlap_genes'] and, if missing, the spatial neighbors graph of `adata_st`).
 
     Args:
@@ -244,7 +244,7 @@ def map_cells_to_space(
 
     Returns:
         A cell-by-spot AnnData containing the probability of mapping cell i on spot j.
-        The `uns` field of the returned AnnData contains the training genes.
+        The `uns` field of the returned AnnData contains the input genes (`uns['input_genes']`): all genes used by the mapping, whatever their split.
         The loss terms history is stored in adata_map.uns['training_history'].
         If 'filter' is True, the `uns` field also contains the filter values and the number of selected cells during each epoch.
         The final filter values are stored in adata_map.obs['F_out'].
@@ -312,16 +312,16 @@ def map_cells_to_space(
 
     # Save results
     logging.info("Saving results...")
-    # Retrieve final training genes (after preprocessing) from DataModule
-    training_genes = data.adata_sc.uns['training_genes']  # available after trainer.fit()
+    # Retrieve final input genes (after preprocessing) from DataModule
+    input_genes = data.adata_sc.uns['input_genes']  # available after trainer.fit()
     # Create AnnData object with the final mapping matrix
     adata_map = sc.AnnData(
         X=final_mapping,
-        obs=data.adata_sc[:, training_genes].obs.copy(),
-        var=data.adata_st[:, training_genes].obs.copy(),
+        obs=data.adata_sc[:, input_genes].obs.copy(),
+        var=data.adata_st[:, input_genes].obs.copy(),
     )
-    # Store training genes in adata_map.uns['training_genes']
-    adata_map.uns['training_genes'] = training_genes
+    # Store input genes in adata_map.uns['input_genes']
+    adata_map.uns['input_genes'] = input_genes
     # Store final filter values in adata_map.obs['F_out']
     if filter:
         adata_map.obs["F_out"] = final_filter

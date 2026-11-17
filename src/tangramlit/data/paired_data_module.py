@@ -60,7 +60,7 @@ class PairedDataModule(LightningDataModule):
         By default, the training genes set is made of the shared genes that are expressed in at least one obs in both datasets.
         Executed before setup() in the trainer.fit call.
         """
-        # Preprocess data - define adata.uns['training_genes'] - originally implemented in tg.mapping_utils.pp_adatas()
+        # Preprocess data - define adata.uns['input_genes'] - originally implemented in tg.mapping_utils.pp_adatas()
         print("Preprocessing data...")
 
         # 1. Put all var indexes to lower case to align
@@ -89,30 +89,30 @@ class PairedDataModule(LightningDataModule):
         filtered_genes_st = self.adata_st[:, filtered_genes_st].var_names
         overlap_filtered_genes = set(filtered_genes_sc) & set(filtered_genes_st)
 
-        # 6. Define training genes as intersection of input training genes and overlapping filtered genes
+        # 6. Define input genes (all genes used by the mapping) as intersection of user input genes and overlapping filtered genes
         if self.input_genes is not None:
-            training_genes = list(set(self.input_genes) & overlap_filtered_genes)
-            print(f"Using {len(training_genes)} training genes provided by user.")
+            input_genes = list(set(self.input_genes) & overlap_filtered_genes)
+            print(f"Using {len(input_genes)} input genes provided by user.")
         else:
-            training_genes = list(overlap_filtered_genes)
-        print(f"Using {len(training_genes)} shared marker genes.")
+            input_genes = list(overlap_filtered_genes)
+        print(f"Using {len(input_genes)} shared marker genes.")
 
-        # 7. Annotate training genes set in adata.uns['training_genes'] and adata.var['is_training']
-        self.adata_sc.uns["training_genes"] = training_genes
-        self.adata_st.uns["training_genes"] = training_genes
+        # 7. Annotate input genes set in adata.uns['input_genes'] and adata.var['is_training']
+        self.adata_sc.uns["input_genes"] = input_genes
+        self.adata_st.uns["input_genes"] = input_genes
         if self.train_genes_names is None:
-            self.adata_sc.var["is_training"] = self.adata_sc.var.index.isin(training_genes)
-            self.adata_st.var["is_training"] = self.adata_st.var.index.isin(training_genes)
+            self.adata_sc.var["is_training"] = self.adata_sc.var.index.isin(input_genes)
+            self.adata_st.var["is_training"] = self.adata_st.var.index.isin(input_genes)
         else:
-            mask_sc = self.adata_sc.var.index.isin(training_genes) & self.adata_sc.var.index.isin(self.train_genes_names)
-            mask_st = self.adata_st.var.index.isin(training_genes) & self.adata_st.var.index.isin(self.train_genes_names)
+            mask_sc = self.adata_sc.var.index.isin(input_genes) & self.adata_sc.var.index.isin(self.train_genes_names)
+            mask_st = self.adata_st.var.index.isin(input_genes) & self.adata_st.var.index.isin(self.train_genes_names)
             self.adata_sc.var["is_training"] = mask_sc
             self.adata_st.var["is_training"] = mask_st
-        # NOTE: adata.var['is_training'] == True iff the gene is both in the filtered shared genes (trainig_genes) and,
+        # NOTE: adata.var['is_training'] == True iff the gene is both in the filtered shared genes (input_genes) and,
         # if applicable, also selected in train_genes_names
         if self.val_genes_names is not None:
-            mask_sc = self.adata_sc.var.index.isin(training_genes) & self.adata_sc.var.index.isin(self.val_genes_names)
-            mask_st = self.adata_st.var.index.isin(training_genes) & self.adata_st.var.index.isin(self.val_genes_names)
+            mask_sc = self.adata_sc.var.index.isin(input_genes) & self.adata_sc.var.index.isin(self.val_genes_names)
+            mask_st = self.adata_st.var.index.isin(input_genes) & self.adata_st.var.index.isin(self.val_genes_names)
             self.adata_sc.var["is_validation"] = mask_sc
             self.adata_st.var["is_validation"] = mask_st
 

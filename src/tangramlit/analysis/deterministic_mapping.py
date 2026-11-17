@@ -164,7 +164,7 @@ def deterministic_mapping_similarity(adata_map, adata_sc, adata_st, flavour: str
         raise ValueError("Invalid flavour. Choose either 'spot_to_cell' or 'cell_to_spot'.")
 
     # Get shared genes
-    shared_genes = adata_map.uns['training_genes']
+    shared_genes = adata_map.uns['input_genes']
 
     # Convert indices/names to a form AnnData accepts
     cell_idx = pairs_df['cell index']
