@@ -4,7 +4,7 @@ Accepts paths to scRNA dataset, spatial dataset, config file, and output directo
 Trains a Tangram mapper and saves results.
 
 Outputs written to the specified output directory:
-  {output_dir}/adata_maparser.h5ad          # Mapped single-cell data
+  {output_dir}/adata_map.h5ad          # Mapped single-cell data
   {output_dir}/training_results.yaml   # Training metadata
   {output_dir}/validation_results.yaml # (optional) Validation metrics
   {output_dir}/spatial_gene_comparison.csv  # (optional) Validation data
@@ -12,19 +12,8 @@ Outputs written to the specified output directory:
 
 import os
 import argparse
-from typing import Sequence
 
-
-def validate_input_files(input_dir: str, file_names: Sequence[str]) -> None:
-    """Ensure input files exist in the given directory."""
-    missing = []
-    for name in file_names:
-        path = os.path.join(input_dir, name)
-        if not os.path.exists(path):
-            missing.append(path)
-    
-    if missing:
-        raise FileNotFoundError("Missing input files:\n" + "\n".join(missing))
+from ._common import validate_input_files
 
 
 def register(subparsers):

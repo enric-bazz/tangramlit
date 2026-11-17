@@ -1,11 +1,8 @@
 import random
 import numpy as np
-import sklearn
 import seaborn as sns
 from matplotlib import pyplot as plt
 from sklearn.metrics import auc
-import logging
-import lightning.pytorch as lp
 from lightning.pytorch import LightningModule
 import torch
 import torch.nn as nn
@@ -346,13 +343,9 @@ class MapperLightning(LightningModule):
 
         return loss_dict
 
-    def on_train_epoch_end(self, N=100, verbose=False):
+    def on_train_epoch_end(self):
         """
-        Handle training history tracking, logging and displaying.
-
-        Args:
-            N (int): number of epochs between each print. Default: 100.
-            verbose (bool): whether to print epoch losses or not. Default: False.
+        Handle training history tracking and logging.
         """
         # Append to training history dictionary
         for key in self.loss_history.keys():
@@ -361,14 +354,6 @@ class MapperLightning(LightningModule):
 
         # Log to tensorboard logger
         self.log_dict(self.epoch_values, prog_bar=False, logger=True, on_epoch=True)
-
-        # Print every N epochs
-        if verbose and (self.current_epoch % N == 0):
-            losses = {
-                k: v.item() if torch.is_tensor(v) else v
-                for k, v in self.trainer.logged_metrics.items()  # logged_metrics: metrics logged via log() with the logger argument set
-            }
-            print(f"Epoch {self.current_epoch}: {losses}")
 
 
 
@@ -464,17 +449,15 @@ class MapperLightning(LightningModule):
             print(f"S matrix shape: {batch['S'].shape}")
             print(f"G matrix shape: {batch['G'].shape}")
 
-    def on_validation_epoch_end(self, verbose=False):
+    def on_validation_epoch_end(self):
         """
-        Print validation terms at the end of each validation epoch during training.
+        Store validation terms at the end of each validation epoch during training.
         """
         if self.trainer.state.fn == 'fit':
             losses = {
                 k: v.item() if torch.is_tensor(v) else v
                 for k, v in self.trainer.progress_bar_metrics.items()
             }
-            if verbose:
-                print(f"\nValidation {self.current_epoch}: {losses}")
             for key, value in losses.items():
                 if key not in self.val_history:
                     self.val_history[key] = []

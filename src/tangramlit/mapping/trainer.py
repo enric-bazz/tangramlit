@@ -8,7 +8,7 @@ import torch
 import warnings
 from anndata import AnnData
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
 from lightning.pytorch.loggers import TensorBoardLogger
 
 
@@ -68,7 +68,8 @@ def validate_mapping_inputs(
         raise ValueError("Both adata_sc and adata_st must be AnnData objects.")
 
     # Extract common genes names
-    warnings.warn("All gene names are converted to lower case for alignment.")
+    if any((adata.var_names != adata.var_names.str.lower()).any() for adata in (adata_sc, adata_st)):
+        warnings.warn("Gene names are converted to lower case for alignment (adata_sc and adata_st are modified in place).")
     sc_genes = set(adata_sc.var_names.str.lower())
     st_genes = set(adata_st.var_names.str.lower())
     common_genes = sc_genes.intersection(st_genes)
@@ -207,6 +208,11 @@ def map_cells_to_space(
     """
     Map single cell data (`adata_sc`) on spatial data (`adata_st`).
 
+    NOTE: `adata_sc` and `adata_st` are modified in place. Gene names are converted to lower case and made unique,
+    cells with a missing `cluster_label` and spots with missing coordinates are removed, and the preprocessing
+    annotations are added (var['sparsity'], var['is_training'], var['is_validation'], uns['training_genes'],
+    uns['overlap_genes'] and, if missing, the spatial neighbors graph of `adata_st`).
+
     Args:
         adata_sc (AnnData): single cell data
         adata_st (AnnData): gene spatial data
@@ -234,7 +240,7 @@ def map_cells_to_space(
         lambda_moran (float): Optional. Strength of Moran's I preservation. Default is 0.
         lambda_ct_islands (float): Optional. Strength of ct islands enforcement. Default is 0. 
         cluster_label (str): Optional. Field in `adata_sc.obs` used for aggregating single cell data. Only valid for lambda_ct-islands > 0. Default is None.
-        experient_name (str): Optional. Name of mapping experiment.
+        experiment_name (str): Optional. Name of mapping experiment, used for the TensorBoard log directory.
 
     Returns:
         A cell-by-spot AnnData containing the probability of mapping cell i on spot j.
@@ -259,21 +265,6 @@ def map_cells_to_space(
                         val_genes_names=val_genes_names,
                         cluster_label=cluster_label,
                         )
-
-    # Customize ModelCheckpoint callback to avoid memory blow-up
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=f"checkpoints/{experiment_name}/",
-        filename='{epoch}-{val_score:.3f}',
-        monitor="val_score",
-        verbose=True,
-        save_last=False,  # save last checkpoint separated from top k
-        save_top_k=0,  # top k models out of all checkpoints
-        mode="max",  # update with higher scores
-        auto_insert_metric_name=True,
-        save_weights_only=True,  # set = False to store optimizer, scheduler states
-        every_n_epochs=50,
-        save_on_train_epoch_end=False,  # val_score is in validation_step()
-    )
 
     # Set early stopper
     early_stop = EarlyStopping(

@@ -13,7 +13,7 @@ def validate_mapping_experiment(model, datamodule, experiment_name=None):
 
     Returns:
         validation_results (dict): Dictionary containing validation results with
-        dict_keys(['val_AUC', 'val_SSIM', 'val_PCC', 'val_RMSE', 'val_JS']).
+        dict_keys(['val_score', 'val_sparsity-weighted_score', 'val_AUC', 'val_entropy']).
         Note that when called as 'results = validate_mapping_experiment(model, datamodule)', results is a list with
         element results[0] containing the dictionary.
     """
