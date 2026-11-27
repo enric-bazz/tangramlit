@@ -368,8 +368,12 @@ class MapperLightning(LightningModule):
         else:
             optimizer = torch.optim.Adam([self.M], lr=self.hparams.learning_rate)
 
+        # threshold_mode='abs': the total loss is usually negative (the similarity terms are subtracted), and the
+        # default relative threshold `loss < best * (1 - threshold)` is then met by any loss close to the best one,
+        # including slightly worse ones, so a plateau is never detected.
         scheduler = {
-            'scheduler': ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10),
+            'scheduler': ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10,
+                                           threshold=1e-4, threshold_mode='abs'),
             'monitor': 'loss',  # monitor total loss for smoother trajectory
             'interval': 'epoch',
             'frequency': 1,
