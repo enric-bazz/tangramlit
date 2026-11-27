@@ -8,12 +8,13 @@ import torch
 import warnings
 from anndata import AnnData
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor
+from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.loggers import TensorBoardLogger
 
 
 from ..data.paired_data_module import PairedDataModule
 from .lit_mapper import MapperLightning, EpochProgressBar
+from .schedule import TrainingSchedule
 
 
 def validate_mapping_inputs(
@@ -215,6 +216,11 @@ def map_cells_to_space(
         lambda_ct_islands=0,
         cluster_label=None,
         experiment_name="tangram_mapping",
+        warmup_epochs=100,
+        patience=20,
+        min_delta=0.001,
+        monitor="val_objective",
+        restore_best=True,
 ):
     """
     Map single cell data (`adata_sc`) on spatial data (`adata_st`).
@@ -233,7 +239,7 @@ def map_cells_to_space(
         test_genes_names (list): Optional. Gene indices held out for testing: never used by training or validation, scored by test_mapping_experiment(). Must be a subset of the genes shared between modalities.
         filter (bool): Whether the cell filter is active or not. Default is False.
         learning_rate (float): Optional. Learning rate for the optimizer. Default is 0.1.
-        num_epochs (int): Optional. Number of epochs. Default is 1000.
+        num_epochs (int): Optional. Maximum number of epochs: training stops earlier if `monitor` stops improving. Default is 1000.
         random_state (int): Optional. pass an int to reproduce training. Default is None.
         device (str): Optional. Pass a specific device to execute lightning. Currently supports 'cpu' or 'gpu'. Default is None and fallbacks to automatic detection.
         lambda_d (float): Optional. Hyperparameter for the density term of the optimizer. Default is 0.
@@ -253,11 +259,21 @@ def map_cells_to_space(
         lambda_ct_islands (float): Optional. Strength of ct islands enforcement. Default is 0. 
         cluster_label (str): Optional. Field in `adata_sc.obs` used for aggregating single cell data. Only valid for lambda_ct-islands > 0. Default is None.
         experiment_name (str): Optional. Name of mapping experiment, used for the TensorBoard log directory.
+        warmup_epochs (int): Optional. Epochs during which early stopping is not evaluated. Default is 100.
+        patience (int): Optional. Epochs without improvement of `monitor` after which training stops. Default is 20.
+        min_delta (float): Optional. Minimum increase of `monitor` that counts as an improvement. Default is 0.001.
+        monitor (str): Optional. Validation metric driving early stopping and the choice of the returned mapping.
+            Default is 'val_objective', the mean of the active similarity terms on the validation genes
+            ('val_score' when lambda_g1 is the only one).
+        restore_best (bool): Optional. Return the mapping of the epoch with the best `monitor` instead of the last one. Default is True.
+            The schedule arguments are the same as in tune_loss_coefficients(): see TrainingSchedule.
 
     Returns:
         A cell-by-spot AnnData containing the probability of mapping cell i on spot j.
         The `uns` field of the returned AnnData contains the input genes (`uns['input_genes']`): all genes used by the mapping, whatever their split.
         The loss terms history is stored in adata_map.uns['training_history'].
+        The outcome of the schedule is stored in adata_map.uns['training_schedule']: monitored metric, its best value and
+        epoch (0-based), number of epochs run and whether the returned mapping is the best one.
         If 'filter' is True, the `uns` field also contains the filter values and the number of selected cells during each epoch.
         The final filter values are stored in adata_map.obs['F_out'].
         The final LightningModule and LightningDataModule objects are also returned.
@@ -279,15 +295,22 @@ def map_cells_to_space(
                         cluster_label=cluster_label,
                         )
 
-    # Set early stopper
-    early_stop = EarlyStopping(
-        monitor="val_score",  # monitor validation score
-        min_delta=0.001,  # score minimum improvement loss, 0.001
-        patience=20,  # related to check_val_every_n_epoch, 20
-        verbose=False,
-        mode="max",
-        check_on_train_epoch_end=False,  # val_score is in validation_step()
+    # Set training schedule (shared with the hyperparameter tuning)
+    schedule = TrainingSchedule(
+        num_epochs=num_epochs,
+        warmup_epochs=warmup_epochs,
+        patience=patience,
+        min_delta=min_delta,
+        monitor=monitor,
+        restore_best=restore_best,
     )
+    if not schedule.can_stop_early:
+        logging.warning(
+            f"num_epochs={num_epochs} <= warmup_epochs + patience = {warmup_epochs + patience}: "
+            "early stopping cannot act, training runs for num_epochs."
+        )
+    schedule_callbacks = schedule.callbacks()
+    best_state = schedule_callbacks[-1]
 
     # Set lr monitor
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
@@ -298,20 +321,25 @@ def map_cells_to_space(
     # Initialize trainer with automatic device detection
     trainer = Trainer(
         logger=train_logger,
-        callbacks=[EpochProgressBar(), lr_monitor, early_stop],
-        min_epochs=200,  # 200
-        max_epochs=num_epochs,  # num_epochs
-        log_every_n_steps=1,  # log every training step == epoch
-        enable_checkpointing=False,
+        callbacks=[EpochProgressBar(), lr_monitor, *schedule_callbacks],
         enable_progress_bar=True,
-        check_val_every_n_epoch=1,  # validation loop after every N training epochs
         accelerator=device if device is not None else "auto",  # 'cpu', 'gpu', or auto-detect
         devices=1,  # force single GPU usage (does not support torch.distributed)
-        precision="16-mixed" if device == 'gpu' else 32,  # Use single precision (32-bit float) for stability, change to "16-mixed" for mixed precision on GPU
+        **schedule.trainer_kwargs(),  # epochs, validation frequency, precision
     )
 
     # Train the model
     trainer.fit(model, datamodule=data)
+
+    # Report the outcome of the schedule (the best mapping is restored by the tracker at the end of fit)
+    epochs_run = trainer.current_epoch
+    if best_state.best_epoch is not None:
+        print(
+            f"Training ended after {epochs_run} epochs"
+            f"{' (early stopping)' if epochs_run < num_epochs else ''}. "
+            f"Best {monitor} = {best_state.best_value:.4f} at epoch {best_state.best_epoch + 1}"
+            f"{': returning that mapping.' if restore_best else ', returning the mapping of the last epoch.'}"
+        )
 
     # Get the final mapping matrix
     with torch.no_grad():
@@ -372,6 +400,16 @@ def map_cells_to_space(
 
     # Store validation history in adata_map.uns['validation_history']
     adata_map.uns['validation_history'] = model.val_history
+
+    # Store the outcome of the schedule in adata_map.uns['training_schedule']
+    if best_state.best_epoch is not None:
+        adata_map.uns['training_schedule'] = {
+            'monitor': monitor,
+            'best_value': best_state.best_value,
+            'best_epoch': best_state.best_epoch,
+            'epochs_run': epochs_run,
+            'restored_best': restore_best,
+        }
 
     return adata_map, model, data
 
