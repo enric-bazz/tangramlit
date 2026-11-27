@@ -95,7 +95,6 @@ def run(args):
 
     # Hardcode config overrides
     config['lambda_sparsity_g1'] = 0
-    config['num_epochs'] = 200
 
     random_state = config.get('random_state', None)
 
