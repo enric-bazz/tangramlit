@@ -546,15 +546,27 @@ class MapperLightning(LightningModule):
 class EpochProgressBar(ProgressBar):
     """
     Overwrite progress bar class to get a single persistent bar over epochs.
+    The bar shows the total training loss and the validation metrics listed in `metrics`.
     """
-    def __init__(self):
+    def __init__(self, metrics=("val_objective", "val_score")):
         super().__init__()
         self.bar = None
+        self.metrics = metrics
 
     def on_train_start(self, trainer, pl_module):
-        self.bar = tqdm(total=trainer.max_epochs, desc="Trainig", leave=True, dynamic_ncols=True)
+        self.bar = tqdm(total=trainer.max_epochs, desc="Training", leave=True, dynamic_ncols=True)
 
     def on_train_epoch_end(self, trainer, pl_module):
+        postfix = {}
+        # Total loss of the epoch (stored by training_step(), logged only after this hook)
+        epoch_values = getattr(pl_module, "epoch_values", None) or {}
+        if "loss" in epoch_values:
+            postfix["loss"] = f"{epoch_values['loss']:.4f}"
+        # Validation metrics of the last validation loop
+        for name in self.metrics:
+            if name in trainer.callback_metrics:
+                postfix[name] = f"{float(trainer.callback_metrics[name]):.4f}"
+        self.bar.set_postfix(postfix, refresh=False)
         self.bar.update(1)
 
     def on_train_end(self, trainer, pl_module):
