@@ -2,6 +2,19 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import cosine_similarity
 
+# Gene expression similarity terms: loss term name -> lambda that weights it.
+# These are the terms that depend on the genes, so they can also be scored on held-out genes.
+SIMILARITY_TERMS = {
+    "main_loss": "lambda_g1",
+    "vg_reg": "lambda_g2",
+    "sparsity_term": "lambda_sparsity_g1",
+    "neighborhood_term": "lambda_neighborhood_g1",
+    "getis_ord_term": "lambda_getis_ord",
+    "moran_term": "lambda_moran",
+    "geary_term": "lambda_geary",
+}
+
+
 class TangramLoss:
     """
     Stateless class to compute the Tangram loss and its components.
@@ -14,6 +27,52 @@ class TangramLoss:
 
          # Define density criterion
         self._density_criterion = nn.KLDivLoss(reduction="sum")
+
+    def similarity_terms(self,
+                         G, G_pred,
+                         voxel_weights=None,
+                         getis_ord_G_star_ref=None, moran_I_ref=None, gearys_C_ref=None,
+                         getis_ord_G_star_pred=None, moran_I_pred=None, gearys_C_pred=None,):
+        """
+        Compute the unweighted gene expression similarity terms (see SIMILARITY_TERMS).
+        Each term is a (weighted) mean cosine similarity between G and G_pred, so it lies in [-1, 1]
+        whatever its lambda. Only the terms whose lambda is > 0 are computed.
+
+        Args:
+            Same as __call__(), restricted to the tensors these terms need.
+
+        Returns:
+            sims: dictionary {term name: unweighted term} with the active terms only.
+        """
+        sims = {}
+
+        # gene-voxel and voxel-gene terms
+        if self.hparams.lambda_g1 > 0:
+            sims["main_loss"] = cosine_similarity(G_pred, G, dim=0).mean()
+        if self.hparams.lambda_g2 > 0:
+            sims["vg_reg"] = cosine_similarity(G_pred, G, dim=1).mean()
+
+        # sparsity-weighted term
+        if self.hparams.lambda_sparsity_g1 > 0:
+            mask = G != 0
+            gene_sparsity = mask.sum(axis=0) / G.shape[0]
+            gene_sparsity = 1 - gene_sparsity.reshape((-1,))
+            sims["sparsity_term"] = ((cosine_similarity(G_pred, G, dim=0) * (1 - gene_sparsity))
+                                     / (1 - gene_sparsity).sum()).sum()
+
+        # neighbor-smoothing term
+        if self.hparams.lambda_neighborhood_g1 > 0:
+            sims["neighborhood_term"] = cosine_similarity(voxel_weights @ G_pred, voxel_weights @ G, dim=0).mean()
+
+        # LISA terms
+        if self.hparams.lambda_getis_ord > 0:
+            sims["getis_ord_term"] = cosine_similarity(getis_ord_G_star_ref, getis_ord_G_star_pred, dim=0).mean()
+        if self.hparams.lambda_moran > 0:
+            sims["moran_term"] = cosine_similarity(moran_I_ref, moran_I_pred, dim=0).mean()
+        if self.hparams.lambda_geary > 0:
+            sims["geary_term"] = cosine_similarity(gearys_C_ref, gearys_C_pred, dim=0).mean()
+
+        return sims
 
     def __call__(self, 
                  G, G_pred, 
@@ -50,9 +109,17 @@ class TangramLoss:
             loss_dict: dictionary containing total loss and components
         """
 
-        # gene-voxel and voxel-gene terms
-        gv_term = self.hparams.lambda_g1 * cosine_similarity(G_pred, G, dim=0).mean()
-        vg_term = self.hparams.lambda_g2 * cosine_similarity(G_pred, G, dim=1).mean()
+        # gene expression similarity terms, each weighted by its lambda (0.0 when inactive)
+        sims = self.similarity_terms(
+            G=G, G_pred=G_pred, voxel_weights=voxel_weights,
+            getis_ord_G_star_ref=getis_ord_G_star_ref, moran_I_ref=moran_I_ref, gearys_C_ref=gearys_C_ref,
+            getis_ord_G_star_pred=getis_ord_G_star_pred, moran_I_pred=moran_I_pred, gearys_C_pred=gearys_C_pred,
+        )
+        weighted = {term: self.hparams[lambda_name] * sims[term] if term in sims else 0.0
+                    for term, lambda_name in SIMILARITY_TERMS.items()}
+        gv_term, vg_term = weighted["main_loss"], weighted["vg_reg"]
+        gv_sparsity_term, gv_neighborhood_term = weighted["sparsity_term"], weighted["neighborhood_term"]
+        getis_ord_term, moran_term, gearys_term = weighted["getis_ord_term"], weighted["moran_term"], weighted["geary_term"]
 
         # density term
         if self.hparams.filter:
@@ -67,34 +134,6 @@ class TangramLoss:
         # l-norm regularization
         l1_term = self.hparams.lambda_l1 * M.abs().sum()
         l2_term = self.hparams.lambda_l2 * (M ** 2).sum()
-
-        # sparsity-weighted  term
-        if self.hparams.lambda_sparsity_g1 > 0:
-            mask = G != 0
-            gene_sparsity = mask.sum(axis=0) / G.shape[0]
-            gene_sparsity = 1 - gene_sparsity.reshape((-1,))
-            gv_sparsity_term = self.hparams.lambda_sparsity_g1 * (
-                        (cosine_similarity(G_pred, G, dim=0) * (1 - gene_sparsity)) / (1 - gene_sparsity).sum()).sum()
-        else:
-            gv_sparsity_term = 0.0
-
-        # neighbor-smoothing term
-        if self.hparams.lambda_neighborhood_g1 > 0:
-            gv_neighborhood_term = self.hparams.lambda_neighborhood_g1 * cosine_similarity(voxel_weights @ G_pred,
-                                                                                    voxel_weights @ G,
-                                                                                    dim=0).mean()
-        else:
-            gv_neighborhood_term = 0.0
-
-        # LISA terms
-        getis_ord_term, moran_term, gearys_term = 0.0, 0.0, 0.0
-        if self.hparams.lambda_getis_ord > 0:
-            getis_ord_term = self.hparams.lambda_getis_ord * cosine_similarity(getis_ord_G_star_ref,
-                                                                        getis_ord_G_star_pred, dim=0).mean()
-        if self.hparams.lambda_moran > 0:
-            moran_term = self.hparams.lambda_moran * cosine_similarity(moran_I_ref, moran_I_pred, dim=0).mean()
-        if self.hparams.lambda_geary > 0:
-            gearys_term = self.hparams.lambda_geary * cosine_similarity(gearys_C_ref, gearys_C_pred, dim=0).mean()
 
         # cell-type island term
         if self.hparams.lambda_ct_islands > 0:

@@ -68,7 +68,8 @@ tangramlit cv -i /path/to/input_dir -sc sc_data.h5ad -ist spatial_data.h5ad -c c
 ```
 
 The configuration file holds the keyword arguments of `map_cells_to_space` (loss coefficients, `filter`,
-`num_epochs`, `random_state`, `cluster_label`, ...).
+`num_epochs`, `random_state`, `cluster_label`, ...), including the training schedule described below.
+`tune` reads the same file and trains every trial with the same schedule.
 
 | Command | Output files |
 |---|---|
@@ -121,6 +122,30 @@ adata_ge = tgl.project_sc_genes_onto_space(adata_map, datamodule)
 per_gene = tgl.compare_spatial_geneexp(adata_ge, datamodule)       # cosine similarity score
 per_gene = tgl.benchmark_mapping(adata_ge, datamodule, per_gene)   # adds PCC, RMSE, JS, SSIM
 ```
+
+### Training schedule
+
+`map_cells_to_space` and `tune_loss_coefficients` train with the same schedule (`tangramlit.mapping.schedule.TrainingSchedule`):
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `num_epochs` | 500 | Maximum number of epochs |
+| `warmup_epochs` | 50 | Epochs during which early stopping is not evaluated |
+| `patience` | 30 | Epochs without improvement of `monitor` before training stops |
+| `min_delta` | 0.001 | Minimum increase of `monitor` that counts as an improvement |
+| `monitor` | `val_objective` | Validation metric that drives early stopping, the returned mapping and the tuning |
+| `restore_best` | `True` | Return the mapping of the best validation epoch instead of the last one (`map_cells_to_space` only) |
+
+`val_objective` is the mean of the similarity terms active in the run (gene-voxel, voxel-gene, sparsity-weighted,
+neighborhood, Getis-Ord, Moran, Geary), computed on the validation genes *without* their lambdas. It is therefore
+comparable between runs with different lambda values, and it equals `val_score` when `lambda_g1` is the only
+similarity term. It is a fixed, equal-weight combination: use `monitor='val_score'` to select on the gene-voxel
+score alone. The terms that do not depend on the genes (density, entropy, L1, L2, cell type islands, filter) are
+not part of it.
+
+The outcome is stored in `adata_map.uns['training_schedule']` (best value and epoch of `monitor`, epochs run).
+The value of `monitor` on the validation genes is used to choose the mapping, so it is optimistic: report the
+metrics of `test_mapping_experiment` on the test genes.
 
 Notes:
 

@@ -24,7 +24,7 @@ class MapperLightning(LightningModule):
             self,
             filter=False,
             learning_rate=0.1,
-            num_epochs=1000,
+            num_epochs=500,
             random_state=None,
             lambda_d=0,
             lambda_g1=1,
@@ -49,7 +49,7 @@ class MapperLightning(LightningModule):
             filter (bool): Whether or not the cell filter is trained. Default is False.
             random_state (int): Optional. pass an int to reproduce training. Default is None.
             learning_rate (float): Optional. Learning rate for the optimizer. Default is 0.1.
-            num_epochs (int): Optional. Number of epochs. Default is 1000.
+            num_epochs (int): Optional. Maximum number of epochs. Default is 500.
             lambda_d (float): Optional. Hyperparameter for the density term of the optimizer. Default is 0.
             lambda_g1 (float): Optional. Hyperparameter for the gene-voxel similarity term of the optimizer. Default is 1.
             lambda_g2 (float): Optional. Hyperparameter for the voxel-gene similarity term of the optimizer. Default is 0.
@@ -120,6 +120,7 @@ class MapperLightning(LightningModule):
             'val_sparsity-weighted_score': [],
             'val_AUC': [],
             'val_entropy': [],
+            'val_objective': [],
         }
 
     def setup(self, stage=None):
@@ -367,8 +368,12 @@ class MapperLightning(LightningModule):
         else:
             optimizer = torch.optim.Adam([self.M], lr=self.hparams.learning_rate)
 
+        # threshold_mode='abs': the total loss is usually negative (the similarity terms are subtracted), and the
+        # default relative threshold `loss < best * (1 - threshold)` is then met by any loss close to the best one,
+        # including slightly worse ones, so a plateau is never detected.
         scheduler = {
-            'scheduler': ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10),
+            'scheduler': ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10,
+                                           threshold=1e-4, threshold_mode='abs'),
             'monitor': 'loss',  # monitor total loss for smoother trajectory
             'interval': 'epoch',
             'frequency': 1,
@@ -394,14 +399,21 @@ class MapperLightning(LightningModule):
 
     def _evaluation_step(self, batch, prefix):
         """
-        Compute the terms shared by validation_step() and test_step(): score, spatial sparsity weighted score, auc, entropy.
+        Compute the terms shared by validation_step() and test_step(): score, spatial sparsity weighted score, auc,
+        entropy and objective.
+
+        The objective is the mean of the unweighted similarity terms of the loss that are active in this run (lambda > 0),
+        computed on the held-out genes: gene-voxel, voxel-gene, sparsity-weighted, neighborhood and LISA similarities.
+        It does not contain the lambdas, so it is comparable between runs that differ only in their lambda values
+        (hyperparameter tuning), and it equals the score when lambda_g1 is the only active similarity term.
+        The terms that do not depend on the genes (density, entropy, L1, L2, cell type islands, filter) are not part of it.
 
         Args:
             batch: full validation or test batch.
             prefix (str): 'val' or 'test', prepended to the name of each term.
 
         Returns:
-            Dictionary of terms: Score, Sparsity-weighted Score, AUC, Entropy
+            Dictionary of terms: Score, Sparsity-weighted Score, AUC, Entropy, Objective
        """
         # Get held-out data
         S_val = batch['S']  # single-cell data (validation or test genes)
@@ -429,10 +441,32 @@ class MapperLightning(LightningModule):
         auc_score, _ = poly2_auc(gv_scores, gene_sparsity, plot_auc=plot_auc)  # skip coordinates
         # Entropy of the mapping probabilities
         prob_entropy = - torch.mean(torch.sum((torch.log(M_probs) * M_probs), dim=1) / np.log(M_probs.shape[1]))
+
+        # Objective: mean of the active similarity terms, unweighted, on the held-out genes
+        if (self.hparams.lambda_getis_ord + self.hparams.lambda_moran + self.hparams.lambda_geary > 0):
+            getis_ord_G_star_ref, moran_I_ref, gearys_C_ref = self._spatial_local_indicators(G_val)
+            getis_ord_G_star_pred, moran_I_pred, gearys_C_pred = self._spatial_local_indicators(G_pred)
+        else:
+            getis_ord_G_star_ref, moran_I_ref, gearys_C_ref = None, None, None
+            getis_ord_G_star_pred, moran_I_pred, gearys_C_pred = None, None, None
+        similarity_terms = self.loss_fn.similarity_terms(
+            G=G_val,
+            G_pred=G_pred,
+            voxel_weights=getattr(self, "voxel_weights", None),
+            getis_ord_G_star_ref=getis_ord_G_star_ref,
+            moran_I_ref=moran_I_ref,
+            gearys_C_ref=gearys_C_ref,
+            getis_ord_G_star_pred=getis_ord_G_star_pred,
+            moran_I_pred=moran_I_pred,
+            gearys_C_pred=gearys_C_pred,
+        )
+        objective = torch.stack(list(similarity_terms.values())).mean()
+
         return {f'{prefix}_score': gv_scores.mean(),
                 f'{prefix}_sparsity-weighted_score': sp_sparsity_weighted_scores.sum(),
                 f'{prefix}_AUC': auc_score,
                 f'{prefix}_entropy': prob_entropy,
+                f'{prefix}_objective': objective,
                 }
 
     def validation_step(self, batch):
@@ -443,7 +477,7 @@ class MapperLightning(LightningModule):
             batch: full validation batch.
 
         Returns:
-            Logs a dictionary of validation terms:  Validation Score, Sparsity-weighted Score, AUC, Entropy
+            Logs a dictionary of validation terms:  Validation Score, Sparsity-weighted Score, AUC, Entropy, Objective
        """
         val_dict = self._evaluation_step(batch, prefix='val')
 
@@ -459,7 +493,7 @@ class MapperLightning(LightningModule):
             batch: full test batch.
 
         Returns:
-            Logs a dictionary of test terms:  Test Score, Sparsity-weighted Score, AUC, Entropy
+            Logs a dictionary of test terms:  Test Score, Sparsity-weighted Score, AUC, Entropy, Objective
        """
         test_dict = self._evaluation_step(batch, prefix='test')
 
@@ -512,15 +546,27 @@ class MapperLightning(LightningModule):
 class EpochProgressBar(ProgressBar):
     """
     Overwrite progress bar class to get a single persistent bar over epochs.
+    The bar shows the total training loss and the validation metrics listed in `metrics`.
     """
-    def __init__(self):
+    def __init__(self, metrics=("val_objective", "val_score")):
         super().__init__()
         self.bar = None
+        self.metrics = metrics
 
     def on_train_start(self, trainer, pl_module):
-        self.bar = tqdm(total=trainer.max_epochs, desc="Trainig", leave=True, dynamic_ncols=True)
+        self.bar = tqdm(total=trainer.max_epochs, desc="Training", leave=True, dynamic_ncols=True)
 
     def on_train_epoch_end(self, trainer, pl_module):
+        postfix = {}
+        # Total loss of the epoch (stored by training_step(), logged only after this hook)
+        epoch_values = getattr(pl_module, "epoch_values", None) or {}
+        if "loss" in epoch_values:
+            postfix["loss"] = f"{epoch_values['loss']:.4f}"
+        # Validation metrics of the last validation loop
+        for name in self.metrics:
+            if name in trainer.callback_metrics:
+                postfix[name] = f"{float(trainer.callback_metrics[name]):.4f}"
+        self.bar.set_postfix(postfix, refresh=False)
         self.bar.update(1)
 
     def on_train_end(self, trainer, pl_module):
