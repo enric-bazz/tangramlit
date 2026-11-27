@@ -120,6 +120,7 @@ class MapperLightning(LightningModule):
             'val_sparsity-weighted_score': [],
             'val_AUC': [],
             'val_entropy': [],
+            'val_objective': [],
         }
 
     def setup(self, stage=None):
@@ -394,14 +395,21 @@ class MapperLightning(LightningModule):
 
     def _evaluation_step(self, batch, prefix):
         """
-        Compute the terms shared by validation_step() and test_step(): score, spatial sparsity weighted score, auc, entropy.
+        Compute the terms shared by validation_step() and test_step(): score, spatial sparsity weighted score, auc,
+        entropy and objective.
+
+        The objective is the mean of the unweighted similarity terms of the loss that are active in this run (lambda > 0),
+        computed on the held-out genes: gene-voxel, voxel-gene, sparsity-weighted, neighborhood and LISA similarities.
+        It does not contain the lambdas, so it is comparable between runs that differ only in their lambda values
+        (hyperparameter tuning), and it equals the score when lambda_g1 is the only active similarity term.
+        The terms that do not depend on the genes (density, entropy, L1, L2, cell type islands, filter) are not part of it.
 
         Args:
             batch: full validation or test batch.
             prefix (str): 'val' or 'test', prepended to the name of each term.
 
         Returns:
-            Dictionary of terms: Score, Sparsity-weighted Score, AUC, Entropy
+            Dictionary of terms: Score, Sparsity-weighted Score, AUC, Entropy, Objective
        """
         # Get held-out data
         S_val = batch['S']  # single-cell data (validation or test genes)
@@ -429,10 +437,32 @@ class MapperLightning(LightningModule):
         auc_score, _ = poly2_auc(gv_scores, gene_sparsity, plot_auc=plot_auc)  # skip coordinates
         # Entropy of the mapping probabilities
         prob_entropy = - torch.mean(torch.sum((torch.log(M_probs) * M_probs), dim=1) / np.log(M_probs.shape[1]))
+
+        # Objective: mean of the active similarity terms, unweighted, on the held-out genes
+        if (self.hparams.lambda_getis_ord + self.hparams.lambda_moran + self.hparams.lambda_geary > 0):
+            getis_ord_G_star_ref, moran_I_ref, gearys_C_ref = self._spatial_local_indicators(G_val)
+            getis_ord_G_star_pred, moran_I_pred, gearys_C_pred = self._spatial_local_indicators(G_pred)
+        else:
+            getis_ord_G_star_ref, moran_I_ref, gearys_C_ref = None, None, None
+            getis_ord_G_star_pred, moran_I_pred, gearys_C_pred = None, None, None
+        similarity_terms = self.loss_fn.similarity_terms(
+            G=G_val,
+            G_pred=G_pred,
+            voxel_weights=getattr(self, "voxel_weights", None),
+            getis_ord_G_star_ref=getis_ord_G_star_ref,
+            moran_I_ref=moran_I_ref,
+            gearys_C_ref=gearys_C_ref,
+            getis_ord_G_star_pred=getis_ord_G_star_pred,
+            moran_I_pred=moran_I_pred,
+            gearys_C_pred=gearys_C_pred,
+        )
+        objective = torch.stack(list(similarity_terms.values())).mean()
+
         return {f'{prefix}_score': gv_scores.mean(),
                 f'{prefix}_sparsity-weighted_score': sp_sparsity_weighted_scores.sum(),
                 f'{prefix}_AUC': auc_score,
                 f'{prefix}_entropy': prob_entropy,
+                f'{prefix}_objective': objective,
                 }
 
     def validation_step(self, batch):
@@ -443,7 +473,7 @@ class MapperLightning(LightningModule):
             batch: full validation batch.
 
         Returns:
-            Logs a dictionary of validation terms:  Validation Score, Sparsity-weighted Score, AUC, Entropy
+            Logs a dictionary of validation terms:  Validation Score, Sparsity-weighted Score, AUC, Entropy, Objective
        """
         val_dict = self._evaluation_step(batch, prefix='val')
 
@@ -459,7 +489,7 @@ class MapperLightning(LightningModule):
             batch: full test batch.
 
         Returns:
-            Logs a dictionary of test terms:  Test Score, Sparsity-weighted Score, AUC, Entropy
+            Logs a dictionary of test terms:  Test Score, Sparsity-weighted Score, AUC, Entropy, Objective
        """
         test_dict = self._evaluation_step(batch, prefix='test')
 

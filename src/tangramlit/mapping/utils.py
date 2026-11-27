@@ -13,7 +13,7 @@ def validate_mapping_experiment(model, datamodule, experiment_name=None):
 
     Returns:
         validation_results (dict): Dictionary containing validation results with
-        dict_keys(['val_score', 'val_sparsity-weighted_score', 'val_AUC', 'val_entropy']).
+        dict_keys(['val_score', 'val_sparsity-weighted_score', 'val_AUC', 'val_entropy', 'val_objective']).
         Note that when called as 'results = validate_mapping_experiment(model, datamodule)', results is a list with
         element results[0] containing the dictionary.
     """
@@ -34,7 +34,7 @@ def test_mapping_experiment(model, datamodule, experiment_name=None):
 
     Returns:
         test_results (dict): Dictionary containing test results with
-        dict_keys(['test_score', 'test_sparsity-weighted_score', 'test_AUC', 'test_entropy']).
+        dict_keys(['test_score', 'test_sparsity-weighted_score', 'test_AUC', 'test_entropy', 'test_objective']).
         Note that when called as 'results = test_mapping_experiment(model, datamodule)', results is a list with
         element results[0] containing the dictionary.
     """
