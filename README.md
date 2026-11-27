@@ -129,9 +129,9 @@ per_gene = tgl.benchmark_mapping(adata_ge, datamodule, per_gene)   # adds PCC, R
 
 | Argument | Default | Meaning |
 |---|---|---|
-| `num_epochs` | 1000 | Maximum number of epochs |
-| `warmup_epochs` | 100 | Epochs during which early stopping is not evaluated |
-| `patience` | 20 | Epochs without improvement of `monitor` before training stops |
+| `num_epochs` | 500 | Maximum number of epochs |
+| `warmup_epochs` | 50 | Epochs during which early stopping is not evaluated |
+| `patience` | 30 | Epochs without improvement of `monitor` before training stops |
 | `min_delta` | 0.001 | Minimum increase of `monitor` that counts as an improvement |
 | `monitor` | `val_objective` | Validation metric that drives early stopping, the returned mapping and the tuning |
 | `restore_best` | `True` | Return the mapping of the best validation epoch instead of the last one (`map_cells_to_space` only) |

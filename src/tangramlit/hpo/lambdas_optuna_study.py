@@ -20,7 +20,7 @@ def tune_loss_coefficients(
         val_genes_names=None,
         cluster_label=None,
         learning_rate=0.1,
-        num_epochs=1000,
+        num_epochs=500,
         random_state=None,
         lambda_d=1,
         lambda_g1=1,
@@ -38,8 +38,8 @@ def tune_loss_coefficients(
         target_count=None,
         lambda_count=1e-5,
         lambda_f_reg=1e-5,  
-        warmup_epochs=100,                            ######### training schedule args
-        patience=20,
+        warmup_epochs=50,                             ######### training schedule args
+        patience=30,
         min_delta=0.001,
         monitor="val_objective",
         study_name="loss_coefficients_tuning",        ########### optuna args

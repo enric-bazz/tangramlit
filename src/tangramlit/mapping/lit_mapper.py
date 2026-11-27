@@ -24,7 +24,7 @@ class MapperLightning(LightningModule):
             self,
             filter=False,
             learning_rate=0.1,
-            num_epochs=1000,
+            num_epochs=500,
             random_state=None,
             lambda_d=0,
             lambda_g1=1,
@@ -49,7 +49,7 @@ class MapperLightning(LightningModule):
             filter (bool): Whether or not the cell filter is trained. Default is False.
             random_state (int): Optional. pass an int to reproduce training. Default is None.
             learning_rate (float): Optional. Learning rate for the optimizer. Default is 0.1.
-            num_epochs (int): Optional. Number of epochs. Default is 1000.
+            num_epochs (int): Optional. Maximum number of epochs. Default is 500.
             lambda_d (float): Optional. Hyperparameter for the density term of the optimizer. Default is 0.
             lambda_g1 (float): Optional. Hyperparameter for the gene-voxel similarity term of the optimizer. Default is 1.
             lambda_g2 (float): Optional. Hyperparameter for the voxel-gene similarity term of the optimizer. Default is 0.

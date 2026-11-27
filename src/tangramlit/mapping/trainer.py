@@ -25,7 +25,7 @@ def validate_mapping_inputs(
         val_genes_names,
         filter,
         learning_rate=0.1,
-        num_epochs=1000,
+        num_epochs=500,
         random_state=None,
         lambda_d=0,
         lambda_g1=1,
@@ -196,7 +196,7 @@ def map_cells_to_space(
         test_genes_names=None,
         filter=False,
         learning_rate=0.1,
-        num_epochs=1000,
+        num_epochs=500,
         random_state=None,
         device=None,
         lambda_d=0,
@@ -216,8 +216,8 @@ def map_cells_to_space(
         lambda_ct_islands=0,
         cluster_label=None,
         experiment_name="tangram_mapping",
-        warmup_epochs=100,
-        patience=20,
+        warmup_epochs=50,
+        patience=30,
         min_delta=0.001,
         monitor="val_objective",
         restore_best=True,
@@ -239,7 +239,7 @@ def map_cells_to_space(
         test_genes_names (list): Optional. Gene indices held out for testing: never used by training or validation, scored by test_mapping_experiment(). Must be a subset of the genes shared between modalities.
         filter (bool): Whether the cell filter is active or not. Default is False.
         learning_rate (float): Optional. Learning rate for the optimizer. Default is 0.1.
-        num_epochs (int): Optional. Maximum number of epochs: training stops earlier if `monitor` stops improving. Default is 1000.
+        num_epochs (int): Optional. Maximum number of epochs: training stops earlier if `monitor` stops improving. Default is 500.
         random_state (int): Optional. pass an int to reproduce training. Default is None.
         device (str): Optional. Pass a specific device to execute lightning. Currently supports 'cpu' or 'gpu'. Default is None and fallbacks to automatic detection.
         lambda_d (float): Optional. Hyperparameter for the density term of the optimizer. Default is 0.
@@ -259,8 +259,8 @@ def map_cells_to_space(
         lambda_ct_islands (float): Optional. Strength of ct islands enforcement. Default is 0. 
         cluster_label (str): Optional. Field in `adata_sc.obs` used for aggregating single cell data. Only valid for lambda_ct-islands > 0. Default is None.
         experiment_name (str): Optional. Name of mapping experiment, used for the TensorBoard log directory.
-        warmup_epochs (int): Optional. Epochs during which early stopping is not evaluated. Default is 100.
-        patience (int): Optional. Epochs without improvement of `monitor` after which training stops. Default is 20.
+        warmup_epochs (int): Optional. Epochs during which early stopping is not evaluated. Default is 50.
+        patience (int): Optional. Epochs without improvement of `monitor` after which training stops. Default is 30.
         min_delta (float): Optional. Minimum increase of `monitor` that counts as an improvement. Default is 0.001.
         monitor (str): Optional. Validation metric driving early stopping and the choice of the returned mapping.
             Default is 'val_objective', the mean of the active similarity terms on the validation genes

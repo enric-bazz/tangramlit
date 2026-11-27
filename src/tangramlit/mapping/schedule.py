@@ -16,10 +16,10 @@ class TrainingSchedule:
     When to validate, when to stop and which mapping to keep. All durations are in epochs.
 
     Args:
-        num_epochs (int): Maximum number of epochs. Default is 1000.
-        warmup_epochs (int): Epochs during which early stopping is not evaluated. Default is 100.
+        num_epochs (int): Maximum number of epochs. Default is 500.
+        warmup_epochs (int): Epochs during which early stopping is not evaluated. Default is 50.
         patience (int): Epochs without improvement of `monitor` after which training stops. The earliest
-            possible stop is therefore at `warmup_epochs + patience` epochs. Default is 20.
+            possible stop is therefore at `warmup_epochs + patience` epochs. Default is 30.
         min_delta (float): Minimum increase of `monitor` that counts as an improvement. Default is 0.001.
         monitor (str): Validation metric that drives early stopping, the choice of the best mapping and the
             hyperparameter tuning. Higher is better. Default is 'val_objective' (see MapperLightning._evaluation_step()),
@@ -28,9 +28,9 @@ class TrainingSchedule:
         restore_best (bool): Return the mapping of the epoch with the best `monitor` rather than the last one.
             Keeps one extra copy of the mapping matrix on the training device. Default is True.
     """
-    num_epochs: int = 1000
-    warmup_epochs: int = 100
-    patience: int = 20
+    num_epochs: int = 500
+    warmup_epochs: int = 50
+    patience: int = 30
     min_delta: float = 0.001
     monitor: str = "val_objective"
     check_val_every_n_epoch: int = 1
